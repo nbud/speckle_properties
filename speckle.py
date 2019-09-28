@@ -29,14 +29,19 @@ import numba
 import math
 import tqdm
 from scipy import ndimage
+import functools
+import pandas as pd
 
+pd.set_option("display.max_columns", None)
 #%%
+
 x = np.linspace(0, 1, 200, endpoint=False)
 y = np.linspace(0, 1, 200, endpoint=False)
 dx = x[1] - x[0]
 dy = y[1] - y[0]
 xx, yy = np.meshgrid(x, y)
-sigma=1.
+sigma = 1.0
+
 
 @numba.njit(parallel=True)
 def _make_field(xx, yy, xp, yp, complex_amps, wavelength):
@@ -44,29 +49,40 @@ def _make_field(xx, yy, xp, yp, complex_amps, wavelength):
     for i in numba.prange(xx.shape[0]):
         for j in range(xx.shape[1]):
             for k in range(xp.shape[0]):
-                r = math.sqrt((xx[i, j]-xp[k])**2 + (yy[i,j]-yp[k])**2)
+                r = math.sqrt((xx[i, j] - xp[k]) ** 2 + (yy[i, j] - yp[k]) ** 2)
                 res[i, j] += complex_amps[k] * np.exp(2j * np.pi / wavelength * r)
     return res
 
 
-def make_field(n = 500, wavelength=0.1):    
+def make_field(n=500, wavelength=0.1):
     rootn = np.sqrt(n)
 
-    xp = stats.uniform(-1, 3.).rvs(size=n)
-    yp = stats.uniform(-1, 3.).rvs(size=n)
-    
+    xp = stats.uniform(-1, 3.0).rvs(size=n)
+    yp = stats.uniform(-1, 3.0).rvs(size=n)
+
     complex_amps = stats.norm(scale=sigma / rootn).rvs(2 * n).view(np.complex_)
-    '''
+    """
     plt.figure()
     plt.hist(complex_amps.real, bins=30, density=True)
     plt.hist(complex_amps.imag, bins=30, density=True)
     t = np.linspace(-3/rootn, 3/rootn)
     plt.plot(t, stats.norm(scale=sigma/rootn).pdf(t))
-    '''
-    
+    """
+
     field = _make_field(xx, yy, xp, yp, complex_amps, wavelength)
-    
+
     return field, xp, yp
+
+
+@functools.lru_cache(maxsize=100, typed=False)
+def make_fields(m, n, wavelength):
+    np.random.seed(123)
+    fields = np.zeros((m, len(x), len(y)), np.complex_)
+    for k in tqdm.trange(m):
+        field, _, _ = make_field(n, wavelength)
+        fields[k] = field
+    return fields
+
 
 np.random.seed(123)
 field, xp, yp = make_field()
@@ -76,48 +92,167 @@ field_ = np.ravel(field)
 plt.figure()
 plt.plot(xp, yp, ".")
 plt.axis("square")
-rect = mpl.patches.Rectangle((0, 0), 1, 1,linewidth=1,edgecolor="C1", facecolor='none')
+rect = mpl.patches.Rectangle(
+    (0, 0), 1, 1, linewidth=1, edgecolor="C1", facecolor="none"
+)
 plt.gca().add_patch(rect)
 plt.title("Scatterers")
 
 #%% Plot field
 plt.figure()
-plt.imshow(np.abs(field), extent=(0,1,0,1))
+plt.imshow(np.abs(field), extent=(0, 1, 0, 1))
 plt.axis("square")
 
+#%% == PART A: estimation of sigma
 
-#%% Calculate stds of pixels
-n = 1000
-wavelength = 0.2
+all_reports_sigma = pd.DataFrame()
+
+
+def report_sigma(method_name, estimates):
+    out = {}
+    out["mean"] = np.mean(estimates)
+    out["trueness_err"] = np.abs(1 - np.mean(estimates))
+    out["std"] = np.std(estimates)
+    out["q5"] = np.quantile(estimates, 0.05)
+    out["q95"] = np.quantile(estimates, 0.95)
+    out["range90"] = out["q95"] - out["q5"]
+    s = pd.Series(out, name=method_name)
+    all_reports_sigma[method_name] = s
+    return s
+
+
+def make_subfield(field):
+    """
+    the one place to downsample, use a smaller field, etc
+    """
+    return field
+
+
+#%% From real part of pixels
+n = 500
+wavelength = 0.1
 
 m = 200
-np.random.seed(123)
-stds = np.zeros(m)
-for k in tqdm.trange(m):
-    field, xp, yp = make_field(n, wavelength)
-    stds[k] = np.std(field.real)
+estimates = np.zeros(m)
+fields = make_fields(m, n, wavelength)
+for k, field in enumerate(fields):
+    field = make_subfield(field)
+    estimates[k] = np.std(field.real)
 
 plt.figure()
-plt.hist(stds, density=True, bins=20)
+plt.hist(estimates, density=True, bins=20)
+print(report_sigma("std_real", estimates))
 
-print(f"Mean std: {np.mean(stds)}")
-print(f"Std std: {np.std(stds)}")
+#%% From real part of pixels - bis
+n = 500
+wavelength = 0.1
 
-#%%
-np.min(field)
-np.max(field)
-np.mean(field)
+m = 200
+estimates = np.zeros(m)
+fields = make_fields(m, n, wavelength)
+for k, field in enumerate(fields):
+    field = make_subfield(field)
+    estimates[k] = np.sqrt(np.mean(field.real ** 2))
 
-#%% Normal dist
+plt.figure()
+plt.hist(estimates, density=True, bins=20)
+print(report_sigma("std_real2", estimates))
+
+#%% From RMS (Rayleigh max lihelihood)
+n = 500
+wavelength = 0.1
+
+m = 200
+estimates = np.zeros(m)
+fields = make_fields(m, n, wavelength)
+for k, field in enumerate(fields):
+    field = make_subfield(field)
+    estimates[k] = np.sqrt(np.mean(np.abs(field) ** 2)) / np.sqrt(2)
+
+plt.figure()
+plt.hist(estimates, density=True, bins=20)
+print(report_sigma("rayleigh_ml", estimates))
+
+#%% From RMS (Rayleigh max lihelihood) + bootstrap
+n = 500
+wavelength = 0.1
+
+m = 200
+estimates = np.zeros(m)
+fields = make_fields(m, n, wavelength)
+np.random.seed(123)
+for k, field in enumerate(tqdm.tqdm(fields)):
+    field = make_subfield(field)
+    estimate_tmp = []
+    _field = field.ravel()
+    for _ in range(10):
+        field_bootstraped = np.random.choice(_field, size=len(_field), replace=True)
+        estimate_tmp.append(
+            np.sqrt(np.mean(np.abs(field_bootstraped) ** 2)) / np.sqrt(2)
+        )
+    estimates[k] = np.mean(estimate_tmp)
+
+plt.figure()
+plt.hist(estimates, density=True, bins=20)
+print(report_sigma("rayleigh_ml_boot", estimates))
+
+#%% From mean of Rayleigh
+# theoretically suboptimal but why not
+n = 500
+wavelength = 0.1
+
+m = 200
+estimates = np.zeros(m)
+fields = make_fields(m, n, wavelength)
+for k, field in enumerate(fields):
+    field = make_subfield(field)
+    estimates[k] = np.mean(np.abs(field)) * np.sqrt(2 / np.pi)
+
+plt.figure()
+plt.hist(estimates, density=True, bins=20)
+print(report_sigma("rayleigh_mean", estimates))
+
+#%% From Rayleigh order statistic
+# See Siddiqui 1964
+
+k_opt = round(0.79681 * (xx.size + 1) - 0.39841 + 1.16312 / (xx.size + 1))
+n = 500
+wavelength = 0.1
+
+m = 200
+estimates = np.zeros(m)
+fields = make_fields(m, n, wavelength)
+for k, field in enumerate(fields):
+    field = make_subfield(field)
+    _field = np.sort(np.ravel(np.abs(field) ** 2))
+    estimates[k] = np.sqrt((0.6275 * _field[k_opt - 1]) / 2)
+
+plt.figure()
+plt.hist(estimates, density=True, bins=20)
+print(report_sigma("rayleigh_order", estimates))
+
+
+#%% Rayleigh ML if we were independant
+m = 200
+estimates = np.zeros(m)
+for k in range(m):
+    field = stats.rayleigh(scale=1).rvs(xx.size)
+    field = make_subfield(field)
+    estimates[k] = np.sqrt(np.mean(np.abs(field) ** 2)) / np.sqrt(2)
+print(report_sigma("rayleigh_ml_best_case", estimates))
+
+#%% Conclusion part A
+print(all_reports_sigma.T)
+
+#%% Plot Normal dist
 t = np.linspace(-3 * sigma, +3 * sigma, 100)
 plt.figure()
 plt.hist(field_.real, density=True, bins=30)
 plt.plot(t, stats.norm(scale=sigma).pdf(t), label="Norm(0, Sigma^2)")
 plt.legend()
 
-
-#%% Rayleigh dist
-rms = np.sqrt(np.mean(np.abs(field_)**2))
+#%% Plot Rayleigh dist
+rms = np.sqrt(np.mean(np.abs(field_) ** 2))
 
 rayleigh = stats.rayleigh(scale=sigma)
 fitte_drayleigh = stats.rayleigh(scale=rms / np.sqrt(2))
@@ -128,118 +263,133 @@ plt.plot(t, rayleigh.pdf(t), label="Rayleigh(sigma)")
 plt.plot(t, fitte_drayleigh.pdf(t), label="Fitted Rayleigh")
 plt.legend()
 
-#%% ACA fft
-n = 500
-wavelength = 0.2
+#%% == PART B: estimation of effective sample size
 
+all_reports_neff = pd.DataFrame()
+
+
+def report_neff(method_name, estimates):
+    out = {}
+    out["mean"] = np.mean(estimates)
+    out["std"] = np.std(estimates)
+    out["q5"] = np.quantile(estimates, 0.05)
+    out["q95"] = np.quantile(estimates, 0.95)
+    out["range90"] = out["q95"] - out["q5"]
+    out["aca"] = 1 / np.mean(estimates)
+    out["acl"] = np.sqrt(out["aca"] / np.pi)
+    s = pd.Series(out, name=method_name)
+    all_reports_neff[method_name] = s
+    return s
+
+
+#%% From fft
+n = 500
+wavelength = 0.1
 m = 200
-np.random.seed(123)
-acas = np.zeros(m)
-for k in tqdm.trange(m):
-    field, xp, yp = make_field(n, wavelength)
-    z = field
-    Z = np.fft.fft2(z)
+
+estimates = np.zeros(m)
+fields = make_fields(m, n, wavelength)
+for k, field in enumerate(tqdm.tqdm(fields)):
+    field = make_subfield(field)
+    Z = np.fft.fft2(field)
     _autocorr = np.fft.ifft2(Z * np.conj(Z))
     autocorr = np.fft.fftshift(_autocorr)
     autocorr_normed = autocorr / _autocorr[0, 0].real
-
-    acas[k] = np.sum(np.abs(autocorr_normed) > (1/np.e)) * dx * dy
+    aca = np.sum(np.abs(autocorr_normed) > (1 / np.e)) * dx * dy
+    estimates[k] = 1 / aca
 
 plt.figure()
-plt.hist(acas, density=True, bins=30)
-plt.xlabel("ACA")
+plt.hist(estimates, density=True, bins=30)
 
-aca = np.mean(acas)
+print(report_neff("fft", estimates))
 
-print("Method FFT2 autocorr")
-print(f"ACA: {aca}")
-print(f"Std: {np.std(acas)}")
-print(f"Std/Mean: {np.std(acas)/aca}")
-print(f"ACL: {np.sqrt(aca/np.pi)}")
-print(f"Unique points: {1/aca}")
-
-#%% ACA FFT with fine cluster identification
-
+#%% From fft with label
 n = 500
-wavelength = 0.2
-
+wavelength = 0.1
 m = 200
-np.random.seed(123)
-acas = np.zeros(m)
-for k in tqdm.trange(m):
-    field, xp, yp = make_field(n, wavelength)
-    z = field
-    Z = np.fft.fft2(z)
+
+estimates = np.zeros(m)
+fields = make_fields(m, n, wavelength)
+for k, field in enumerate(tqdm.tqdm(fields)):
+    field = make_subfield(field)
+    Z = np.fft.fft2(field)
     _autocorr = np.fft.ifft2(Z * np.conj(Z))
     autocorr = np.fft.fftshift(_autocorr)
     autocorr_normed = autocorr / _autocorr[0, 0].real
     labels, _ = ndimage.measurements.label(np.abs(autocorr_normed) > 1 / np.e)
     centre_label = labels[labels.shape[0] // 2, labels.shape[1] // 2]
-    acas[k] = np.sum(labels == centre_label) * dx * dy
+    aca = np.sum(labels == centre_label) * dx * dy
+    estimates[k] = 1 / aca
 
 plt.figure()
-plt.hist(acas, density=True, bins=30)
-plt.xlabel("ACA")
+plt.hist(estimates, density=True, bins=30)
 
-aca = np.mean(acas)
-
-print("Method FFT2 autocorr with label identification")
-print(f"ACA: {aca}")
-print(f"Std: {np.std(acas)}")
-print(f"Std/Mean: {np.std(acas)/aca}")
-print(f"ACL: {np.sqrt(aca/np.pi)}")
-print(f"Unique points: {1/aca}")
+print(report_neff("fft_label", estimates))
 
 
-#%% ACA fft padded
+#%% From fft with label and padded
 n = 500
-wavelength = 0.2
-
+wavelength = 0.1
 m = 200
-np.random.seed(123)
-fields = []
-for k in tqdm.trange(m):
-    field, xp, yp = make_field(n, wavelength)
-    fields.append(field)
 
-#%%
+# padding factor
 p = 2
-acas = np.zeros(len(fields))
-for k, field in enumerate(fields):
-    z = field[:200,:200]
-    Z = np.fft.fft2(z, (p * z.shape[0], p * z.shape[1]))
+
+estimates = np.zeros(m)
+fields = make_fields(m, n, wavelength)
+for k, field in enumerate(tqdm.tqdm(fields)):
+    field = make_subfield(field)
+    Z = np.fft.fft2(field, (p * field.shape[0], p * field.shape[1]))
     _autocorr = np.fft.ifft2(Z * np.conj(Z))
     autocorr = np.fft.fftshift(_autocorr)
     autocorr_normed = autocorr / _autocorr[0, 0].real
     labels, _ = ndimage.measurements.label(np.abs(autocorr_normed) > 1 / np.e)
     centre_label = labels[labels.shape[0] // 2, labels.shape[1] // 2]
-    acas[k] = np.sum(labels == centre_label) * dx * dy
+    aca = np.sum(labels == centre_label) * dx * dy
+    estimates[k] = 1 / aca
 
 plt.figure()
-plt.hist(acas, density=True, bins=30)
-plt.xlabel("ACA")
+plt.hist(estimates, density=True, bins=30)
 
-aca = np.mean(acas)
+print(report_neff("fft_label_padded", estimates))
 
-print("Method FFT2 autocorr padded with label identification")
-print(f"ACA: {aca}")
-print(f"Std: {np.std(acas)}")
-print(f"Std/Mean: {np.std(acas)/aca}")
-print(f"ACL: {np.sqrt(aca/np.pi)}")
-print(f"Unique points: {1/aca}")
+#%% From variance of Rayleigh sigma ML estimator
+# Var(sigma ML estimator) = sigma^2 / (4 n)
+# from http://ocw.mit.edu/ans7870/18/18.443/s15/projects/Rproject3_rmd_rayleigh_theory.html
+
+neff = sigma ** 2 / (4 * all_reports_sigma.loc["std", "rayleigh_ml"] ** 2)
+print(report_neff("var_sigma_ml", [neff]))
 
 
-µ#%%
+# Validation, it works...
+# m = 1000
+# estimates = np.zeros(m)
+# for k in range(m):
+#    field = stats.rayleigh(scale=sigma).rvs(size=int(round(neff)))
+#    estimates[k] = np.sqrt(np.mean(np.abs(field) ** 2)) / np.sqrt(2)
+# print(np.std(estimates) ** 2)
+# print(np.mean((estimates - sigma) ** 2))
+# print(sigma ** 2 / (4 * neff))
+
+#%% Conclusion part B
+print(all_reports_neff.T)
+
+
+#%% Plot fft autocorr
 plt.figure()
-plt.imshow(np.abs(autocorr_normed), extent=(0,1,0,1))
+plt.imshow(np.abs(autocorr_normed), extent=(0, 1, 0, 1))
 plt.title("autocorrelation with fft")
 
 plt.figure()
-plt.imshow(np.abs(autocorr_normed) > 1 / np.e, extent=(0,1,0,1))
+plt.imshow(np.abs(autocorr_normed) > 1 / np.e, extent=(0, 1, 0, 1))
 plt.title("autocorrelation with fft")
 
 plt.figure()
-plt.imshow(labels == centre_label, extent=(0,1,0,1))
+plt.imshow(labels, extent=(0, 1, 0, 1))
+plt.title("autocorrelation with fft")
+
+plt.figure()
+plt.imshow(labels == centre_label, extent=(0, 1, 0, 1))
 plt.title("autocorrelation with fft")
 
 #%% 1D autocorr
@@ -255,7 +405,7 @@ plt.figure()
 plt.plot(y, np.abs(autocorr_normed))
 
 print("FWHM")
-print(np.sum(np.abs(autocorr_normed) > 1/np.e) * dy)
+print(np.sum(np.abs(autocorr_normed) > 1 / np.e) * dy)
 
 #%% Find number of unique points using the dist of maximas
 
@@ -268,22 +418,24 @@ maximas = np.zeros(m)
 for k in tqdm.trange(m):
     field, xp, yp = make_field(n, wavelength)
     maximas[k] = np.max(np.abs(field))
-    
+
 #%%
 
 # around 400 for wavelength=0.2
 # around 2000 for wavelength=0.1
-    
+
 t = np.linspace(0, 1.5 * maximas.max(), 200)
+
 
 def maxrayleigh_pdf(t, n):
     dist = stats.rayleigh(scale=sigma)
-    return n * dist.cdf(t)**(n-1) * dist.pdf(t)
+    return n * dist.cdf(t) ** (n - 1) * dist.pdf(t)
+
 
 plt.figure()
 plt.hist(maximas, density=True, bins=20)
-#plt.plot(t, maxrayleigh_pdf(t, 400))
-#plt.plot(t, maxrayleigh_pdf(t, 2000))
+# plt.plot(t, maxrayleigh_pdf(t, 400))
+# plt.plot(t, maxrayleigh_pdf(t, 2000))
 plt.plot(t, maxrayleigh_pdf(t, 400))
 
 #%% ACA goodman
@@ -303,7 +455,7 @@ for k in tqdm.trange(m):
     _autocorr = np.fft.ifft2(Z * np.conj(Z))
     autocorr = np.fft.fftshift(_autocorr)
     autocorr_normed = autocorr / _autocorr[0, 0].real
-    acas[k] = np.trapz(np.trapz(np.abs(autocorr_normed), dx=dy/p), dx=dx/p)
+    acas[k] = np.trapz(np.trapz(np.abs(autocorr_normed), dx=dy / p), dx=dx / p)
 
 plt.figure()
 plt.hist(acas, density=True, bins=30)
@@ -326,12 +478,12 @@ autocorr = np.fft.fftshift(np.fft.ifft(z * np.conj(z)))
 autocorr = autocorr / np.max(np.abs(autocorr))
 plt.figure()
 plt.plot(t, np.abs(autocorr))
-plt.plot(t, np.abs(autocorr) > 1/np.e)
+plt.plot(t, np.abs(autocorr) > 1 / np.e)
 
 #%% Autocorr of exp(-x^2) cos(x)
 
 t = np.linspace(-1, 1, 200, endpoint=False)
-y = np.cos(2 * np.pi * t) * np.exp(-t**2)
+y = np.cos(2 * np.pi * t) * np.exp(-t ** 2)
 
 plt.figure()
 plt.plot(t, y)
@@ -341,6 +493,4 @@ autocorr = np.fft.fftshift(np.fft.ifft(z * np.conj(z)))
 autocorr = autocorr / np.max(np.abs(autocorr))
 plt.figure()
 plt.plot(t, np.abs(autocorr))
-plt.plot(t, np.abs(autocorr) > 1/np.e)
-
-
+plt.plot(t, np.abs(autocorr) > 1 / np.e)

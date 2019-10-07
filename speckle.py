@@ -18,7 +18,6 @@ Final method: FFT padded + label identification
 ACA ~ (wavelength / 2)^2
 Number of unique points ~ 1/(wavelength / 2)^2
 
-Goodman does not work
 
 """
 from scipy import stats
@@ -268,7 +267,7 @@ plt.legend()
 all_reports_neff = pd.DataFrame()
 
 
-def report_neff(method_name, estimates):
+def report_neff(method_name, estimates, save=True):
     out = {}
     out["mean"] = np.mean(estimates)
     out["std"] = np.std(estimates)
@@ -278,7 +277,8 @@ def report_neff(method_name, estimates):
     out["aca"] = 1 / np.mean(estimates)
     out["acl"] = np.sqrt(out["aca"] / np.pi)
     s = pd.Series(out, name=method_name)
-    all_reports_neff[method_name] = s
+    if save:
+        all_reports_neff[method_name] = s
     return s
 
 
@@ -287,15 +287,21 @@ n = 500
 wavelength = 0.1
 m = 200
 
-estimates = np.zeros(m)
-fields = make_fields(m, n, wavelength)
-for k, field in enumerate(tqdm.tqdm(fields)):
-    field = make_subfield(field)
+
+def aca_fft(field):
     Z = np.fft.fft2(field)
     _autocorr = np.fft.ifft2(Z * np.conj(Z))
     autocorr = np.fft.fftshift(_autocorr)
     autocorr_normed = autocorr / _autocorr[0, 0].real
     aca = np.sum(np.abs(autocorr_normed) > (1 / np.e)) * dx * dy
+    return aca, autocorr_normed
+
+
+estimates = np.zeros(m)
+fields = make_fields(m, n, wavelength)
+for k, field in enumerate(tqdm.tqdm(fields)):
+    field = make_subfield(field)
+    aca, autocorr_normed = aca_fft(field)
     estimates[k] = 1 / aca
 
 plt.figure()
@@ -308,10 +314,8 @@ n = 500
 wavelength = 0.1
 m = 200
 
-estimates = np.zeros(m)
-fields = make_fields(m, n, wavelength)
-for k, field in enumerate(tqdm.tqdm(fields)):
-    field = make_subfield(field)
+
+def aca_fft_label(field):
     Z = np.fft.fft2(field)
     _autocorr = np.fft.ifft2(Z * np.conj(Z))
     autocorr = np.fft.fftshift(_autocorr)
@@ -319,6 +323,14 @@ for k, field in enumerate(tqdm.tqdm(fields)):
     labels, _ = ndimage.measurements.label(np.abs(autocorr_normed) > 1 / np.e)
     centre_label = labels[labels.shape[0] // 2, labels.shape[1] // 2]
     aca = np.sum(labels == centre_label) * dx * dy
+    return aca, autocorr_normed, labels, centre_label
+
+
+estimates = np.zeros(m)
+fields = make_fields(m, n, wavelength)
+for k, field in enumerate(tqdm.tqdm(fields)):
+    field = make_subfield(field)
+    aca, autocorr_normed, labels, centre_label = aca_fft_label(field)
     estimates[k] = 1 / aca
 
 plt.figure()
@@ -335,10 +347,8 @@ m = 200
 # padding factor
 p = 2
 
-estimates = np.zeros(m)
-fields = make_fields(m, n, wavelength)
-for k, field in enumerate(tqdm.tqdm(fields)):
-    field = make_subfield(field)
+
+def aca_fft_label_padded(field, p):
     Z = np.fft.fft2(field, (p * field.shape[0], p * field.shape[1]))
     _autocorr = np.fft.ifft2(Z * np.conj(Z))
     autocorr = np.fft.fftshift(_autocorr)
@@ -346,34 +356,20 @@ for k, field in enumerate(tqdm.tqdm(fields)):
     labels, _ = ndimage.measurements.label(np.abs(autocorr_normed) > 1 / np.e)
     centre_label = labels[labels.shape[0] // 2, labels.shape[1] // 2]
     aca = np.sum(labels == centre_label) * dx * dy
+    return aca, autocorr_normed, labels, centre_label
+
+
+estimates = np.zeros(m)
+fields = make_fields(m, n, wavelength)
+for k, field in enumerate(tqdm.tqdm(fields)):
+    field = make_subfield(field)
+    aca, autocorr_normed, labels, centre_label = aca_fft_label_padded(field, p)
     estimates[k] = 1 / aca
 
 plt.figure()
 plt.hist(estimates, density=True, bins=30)
 
 print(report_neff("fft_label_padded", estimates))
-
-#%% From variance of Rayleigh sigma ML estimator
-# Var(sigma ML estimator) = sigma^2 / (4 n)
-# from http://ocw.mit.edu/ans7870/18/18.443/s15/projects/Rproject3_rmd_rayleigh_theory.html
-
-neff = sigma ** 2 / (4 * all_reports_sigma.loc["std", "rayleigh_ml"] ** 2)
-print(report_neff("var_sigma_ml", [neff]))
-
-
-# Validation, it works...
-# m = 1000
-# estimates = np.zeros(m)
-# for k in range(m):
-#    field = stats.rayleigh(scale=sigma).rvs(size=int(round(neff)))
-#    estimates[k] = np.sqrt(np.mean(np.abs(field) ** 2)) / np.sqrt(2)
-# print(np.std(estimates) ** 2)
-# print(np.mean((estimates - sigma) ** 2))
-# print(sigma ** 2 / (4 * neff))
-
-#%% Conclusion part B
-print(all_reports_neff.T)
-
 
 #%% Plot fft autocorr
 plt.figure()
@@ -392,22 +388,33 @@ plt.figure()
 plt.imshow(labels == centre_label, extent=(0, 1, 0, 1))
 plt.title("autocorrelation with fft")
 
-#%% 1D autocorr
 
-z = field[0]
-Z = np.fft.fft(z)
-_autocorr = np.fft.ifft(Z * np.conj(Z))
-autocorr = np.fft.fftshift(_autocorr)
-autocorr_normed = autocorr / _autocorr[0].real
+#%% From variance of Rayleigh sigma ML estimator
+# Var(sigma ML estimator) = sigma^2 / (4 n)
+# from http://ocw.mit.edu/ans7870/18/18.443/s15/projects/Rproject3_rmd_rayleigh_theory.html
 
+# Numerical validation of Var(sigma ML estimator) = sigma^2 / (4 n)
+m = 1000
+neff = 50
+sigma_estimates = np.zeros(m)
+np.random.seed(123)
+for k in range(m):
+    field = stats.rayleigh(scale=sigma).rvs(size=neff)
+    sigma_estimates[k] = np.sqrt(np.mean(np.abs(field) ** 2)) / np.sqrt(2)
+print("---")
+print(f"Experimental Var(sigma_ml) = {np.var(sigma_estimates)}")
+print(f"Theoretical Var(sigma_ml) = {sigma ** 2 / (4 * neff)}")
+print(f"Experimental neff = {sigma **2 / (4 * np.var(sigma_estimates))}")
+print(f"Actual neff = {neff}")
+print("---")
 
-plt.figure()
-plt.plot(y, np.abs(autocorr_normed))
+# Estimate neff from variance
+neff = sigma ** 2 / (4 * all_reports_sigma.loc["std", "rayleigh_ml"] ** 2)
+print(report_neff("var_sigma_ml", [neff]))
 
-print("FWHM")
-print(np.sum(np.abs(autocorr_normed) > 1 / np.e) * dy)
+#%% From dist of maxima
 
-#%% Find number of unique points using the dist of maximas
+# TODO
 
 n = 500
 wavelength = 0.2
@@ -418,8 +425,6 @@ maximas = np.zeros(m)
 for k in tqdm.trange(m):
     field, xp, yp = make_field(n, wavelength)
     maximas[k] = np.max(np.abs(field))
-
-#%%
 
 # around 400 for wavelength=0.2
 # around 2000 for wavelength=0.1
@@ -438,59 +443,111 @@ plt.hist(maximas, density=True, bins=20)
 # plt.plot(t, maxrayleigh_pdf(t, 2000))
 plt.plot(t, maxrayleigh_pdf(t, 400))
 
-#%% ACA goodman
 
+#%% From Goodman // Wagner 1983 eq 31 (unpadded)
 n = 500
-wavelength = 0.2
-
-p = 2
-
+wavelength = 0.1
 m = 200
-np.random.seed(123)
-acas = np.zeros(m)
-for k in tqdm.trange(m):
-    field, xp, yp = make_field(n, wavelength)
-    z = field
-    Z = np.fft.fft2(z, (z.shape[0] * p, z.shape[1] * p))
+
+
+def aca_goodman(field, p=1):
+    field = make_subfield(field)
+    Z = np.fft.fft2(field, (p * field.shape[0], p * field.shape[1]))
     _autocorr = np.fft.ifft2(Z * np.conj(Z))
     autocorr = np.fft.fftshift(_autocorr)
     autocorr_normed = autocorr / _autocorr[0, 0].real
-    acas[k] = np.trapz(np.trapz(np.abs(autocorr_normed), dx=dy / p), dx=dx / p)
+    aca = np.trapz(np.trapz(np.abs(autocorr_normed), dx=dy), dx=dx)
+    return aca
+
+
+estimates = np.zeros(m)
+fields = make_fields(m, n, wavelength)
+for k, field in enumerate(tqdm.tqdm(fields)):
+    field = make_subfield(field)
+    aca = aca_goodman(field, p=1)
+    estimates[k] = 1 / aca
 
 plt.figure()
-plt.hist(acas, density=True, bins=30)
-plt.xlabel("ACA")
+plt.hist(estimates, density=True, bins=30)
 
-aca = np.mean(acas)
+print(report_neff("goodman", estimates))
 
-print("Method Goodman")
-print(f"ACA: {aca}")
-print(f"Std: {np.std(acas)}")
-print(f"Std/Mean: {np.std(acas)/aca}")
-print(f"ACL: {np.sqrt(aca/np.pi)}")
-print(f"Unique points: {1/aca}")
+#%% From Goodman // Wagner 1983 eq 31 (padded)
+n = 500
+wavelength = 0.1
+m = 200
 
-#%% Autocorr of cos
+p = 2
 
-t = np.linspace(-1, 1, 200, endpoint=False)
-z = np.fft.fft(np.sin(2 * np.pi * t))
-autocorr = np.fft.fftshift(np.fft.ifft(z * np.conj(z)))
-autocorr = autocorr / np.max(np.abs(autocorr))
-plt.figure()
-plt.plot(t, np.abs(autocorr))
-plt.plot(t, np.abs(autocorr) > 1 / np.e)
 
-#%% Autocorr of exp(-x^2) cos(x)
-
-t = np.linspace(-1, 1, 200, endpoint=False)
-y = np.cos(2 * np.pi * t) * np.exp(-t ** 2)
+estimates = np.zeros(m)
+fields = make_fields(m, n, wavelength)
+for k, field in enumerate(tqdm.tqdm(fields)):
+    field = make_subfield(field)
+    aca = aca_goodman(field, p)
+    estimates[k] = 1 / aca
 
 plt.figure()
-plt.plot(t, y)
+plt.hist(estimates, density=True, bins=30)
 
-z = np.fft.fft(y)
-autocorr = np.fft.fftshift(np.fft.ifft(z * np.conj(z)))
-autocorr = autocorr / np.max(np.abs(autocorr))
-plt.figure()
-plt.plot(t, np.abs(autocorr))
-plt.plot(t, np.abs(autocorr) > 1 / np.e)
+print(report_neff("goodman_padded", estimates))
+
+
+#%% Conclusion part B
+print(all_reports_neff.T)
+
+#%% == PART C: pretty plots
+
+#%% ACA estimates vs wavelength
+
+n = 500
+wavelengths = np.array([0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5])
+m = 200
+
+# padding factor
+p = 2
+
+res = []
+for wavelength in tqdm.tqdm(wavelengths):
+    estimates_fft = np.zeros(m)
+    estimates_fft_label = np.zeros(m)
+    estimates_fft_label_padded = np.zeros(m)
+    estimates_goodman = np.zeros(m)
+    fields = make_fields(m, n, wavelength)
+    for k, field in enumerate(fields):
+        field = make_subfield(field)
+        aca, _ = aca_fft(field)
+        estimates_fft[k] = 1 / aca
+
+        aca, _, _, _ = aca_fft_label(field)
+        estimates_fft_label[k] = 1 / aca
+
+        aca, _, _, _ = aca_fft_label_padded(field, p)
+        estimates_fft_label_padded[k] = 1 / aca
+
+        aca = aca_goodman(field, p)
+        estimates_goodman[k] = 1 / aca
+
+    report = report_neff("fft", estimates_fft, save=False)
+    report["wavelength"] = wavelength
+    res.append(report)
+
+    report = report_neff("fft_label", estimates_fft_label, save=False)
+    report["wavelength"] = wavelength
+    res.append(report)
+
+    report = report_neff("fft_label_padded", estimates_fft_label_padded, save=False)
+    report["wavelength"] = wavelength
+    res.append(report)
+
+    report = report_neff("goodman_padded", estimates_goodman, save=False)
+    report["wavelength"] = wavelength
+    res.append(report)
+
+#%% ACA FFT vs wavelength - Plot
+df = pd.DataFrame(res)
+df.index.name = "method"
+df.reset_index().pivot(index="wavelength", columns="method", values="mean").plot(
+    logy=True, logx=True
+)
+plt.plot(wavelengths, 4 / wavelengths ** 2, "o", label="theory")

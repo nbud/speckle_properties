@@ -288,13 +288,13 @@ def report_neff(method_name, estimates, save=True):
     return s
 
 
-#%% From fft
+#%% From FWHM (cutoff 1/e) (all lobes)
 n = 500
 wavelength = 0.1
 m = 200
 
 
-def aca_fft(field):
+def aca_fwhm(field):
     Z = np.fft.fft2(field)
     _autocorr = np.fft.ifft2(Z * np.conj(Z))
     autocorr = np.fft.fftshift(_autocorr)
@@ -307,54 +307,21 @@ estimates = np.zeros(m)
 fields = make_fields(m, n, wavelength)
 for k, field in enumerate(tqdm.tqdm(fields)):
     field = make_subfield(field)
-    aca, autocorr_normed = aca_fft(field)
+    aca, autocorr_normed = aca_fwhm(field)
     estimates[k] = 1 / aca
 
 plt.figure()
 plt.hist(estimates, density=True, bins=30)
 
-print(report_neff("fft", estimates))
+print(report_neff("fwhm", estimates))
 
-#%% From fft with label
+#%% From FWHM (cutoff 1/e) (main lobe)
 n = 500
 wavelength = 0.1
 m = 200
 
 
-def aca_fft_label(field):
-    Z = np.fft.fft2(field)
-    _autocorr = np.fft.ifft2(Z * np.conj(Z))
-    autocorr = np.fft.fftshift(_autocorr)
-    autocorr_normed = autocorr / _autocorr[0, 0].real
-    labels, _ = ndimage.measurements.label(np.abs(autocorr_normed) > 1 / np.e)
-    centre_label = labels[labels.shape[0] // 2, labels.shape[1] // 2]
-    aca = np.sum(labels == centre_label) * dx * dy
-    return aca, autocorr_normed, labels, centre_label
-
-
-estimates = np.zeros(m)
-fields = make_fields(m, n, wavelength)
-for k, field in enumerate(tqdm.tqdm(fields)):
-    field = make_subfield(field)
-    aca, autocorr_normed, labels, centre_label = aca_fft_label(field)
-    estimates[k] = 1 / aca
-
-plt.figure()
-plt.hist(estimates, density=True, bins=30)
-
-print(report_neff("fft_label", estimates))
-
-
-#%% From fft with label and padded
-n = 500
-wavelength = 0.1
-m = 200
-
-# padding factor
-p = 2
-
-
-def aca_fft_label_padded(field, p):
+def aca_fwhm_main_lobe(field, p=1):
     Z = np.fft.fft2(field, (p * field.shape[0], p * field.shape[1]))
     _autocorr = np.fft.ifft2(Z * np.conj(Z))
     autocorr = np.fft.fftshift(_autocorr)
@@ -369,13 +336,34 @@ estimates = np.zeros(m)
 fields = make_fields(m, n, wavelength)
 for k, field in enumerate(tqdm.tqdm(fields)):
     field = make_subfield(field)
-    aca, autocorr_normed, labels, centre_label = aca_fft_label_padded(field, p)
+    aca, autocorr_normed, labels, centre_label = aca_fwhm_main_lobe(field)
     estimates[k] = 1 / aca
 
 plt.figure()
 plt.hist(estimates, density=True, bins=30)
 
-print(report_neff("fft_label_padded", estimates))
+print(report_neff("fwhm_main_lobe", estimates))
+
+
+#%% From fft with label and padded
+n = 500
+wavelength = 0.1
+m = 200
+
+# padding factor
+p = 2
+
+estimates = np.zeros(m)
+fields = make_fields(m, n, wavelength)
+for k, field in enumerate(tqdm.tqdm(fields)):
+    field = make_subfield(field)
+    aca, autocorr_normed, labels, centre_label = aca_fwhm_main_lobe(field, p)
+    estimates[k] = 1 / aca
+
+plt.figure()
+plt.hist(estimates, density=True, bins=30)
+
+print(report_neff("fwhm_main_lobe_padded", estimates))
 
 #%% Plot fft autocorr
 plt.figure()
@@ -450,14 +438,16 @@ plt.hist(maximas, density=True, bins=20)
 plt.plot(t, maxrayleigh_pdf(t, 400))
 
 
-#%% From Goodman // Wagner 1983 eq 31 (unpadded)
+#%% From area under curve (Goodman // Wagner 1983 eq 31) (unpadded)
 
 n = 500
 wavelength = 0.1
 m = 200
 
+p = 2
 
-def aca_goodman(field, p=1):
+
+def aca_auc(field, p=1):
     """
     ACA based on total area under autocorrelation curve
     """
@@ -474,33 +464,13 @@ estimates = np.zeros(m)
 fields = make_fields(m, n, wavelength)
 for k, field in enumerate(tqdm.tqdm(fields)):
     field = make_subfield(field)
-    aca = aca_goodman(field, p=1)
+    aca = aca_auc(field, p=1)
     estimates[k] = 1 / aca
 
 plt.figure()
 plt.hist(estimates, density=True, bins=30)
 
-print(report_neff("goodman", estimates))
-
-#%% From Goodman // Wagner 1983 eq 31 (padded)
-n = 500
-wavelength = 0.1
-m = 200
-
-p = 2
-
-
-estimates = np.zeros(m)
-fields = make_fields(m, n, wavelength)
-for k, field in enumerate(tqdm.tqdm(fields)):
-    field = make_subfield(field)
-    aca = aca_goodman(field, p)
-    estimates[k] = 1 / aca
-
-plt.figure()
-plt.hist(estimates, density=True, bins=30)
-
-print(report_neff("goodman_padded", estimates))
+print(report_neff("auc", estimates))
 
 #%% From area under main lobe
 
@@ -582,42 +552,44 @@ p = 2
 
 res = []
 for wavelength in tqdm.tqdm(wavelengths):
-    estimates_fft = np.zeros(m)
-    estimates_fft_label = np.zeros(m)
-    estimates_fft_label_padded = np.zeros(m)
-    estimates_goodman = np.zeros(m)
+    estimates_fwhm = np.zeros(m)
+    estimates_fwhm_main_lobe = np.zeros(m)
+    estimates_fwhm_main_lobe_padded = np.zeros(m)
+    estimates_auc = np.zeros(m)
     estimates_area_main_lobe = np.zeros(m)
     fields = make_fields(m, n, wavelength)
     for k, field in enumerate(fields):
         field = make_subfield(field)
-        aca, _ = aca_fft(field)
-        estimates_fft[k] = 1 / aca
+        aca, _ = aca_fwhm(field)
+        estimates_fwhm[k] = 1 / aca
 
-        aca, _, _, _ = aca_fft_label(field)
-        estimates_fft_label[k] = 1 / aca
+        aca, _, _, _ = aca_fwhm_main_lobe(field)
+        estimates_fwhm_main_lobe[k] = 1 / aca
 
-        aca, _, _, _ = aca_fft_label_padded(field, p)
-        estimates_fft_label_padded[k] = 1 / aca
+        aca, _, _, _ = aca_fwhm_main_lobe(field, p)
+        estimates_fwhm_main_lobe_padded[k] = 1 / aca
 
-        aca = aca_goodman(field, p)
-        estimates_goodman[k] = 1 / aca
+        aca = aca_auc(field, p)
+        estimates_auc[k] = 1 / aca
 
         aca, _, _, _ = aca_area_main_lobe(field, p)
         estimates_area_main_lobe[k] = 1 / aca
 
-    report = report_neff("fft", estimates_fft, save=False)
+    report = report_neff("fwhm", estimates_fwhm, save=False)
     report["wavelength"] = wavelength
     res.append(report)
 
-    report = report_neff("fft_label", estimates_fft_label, save=False)
+    report = report_neff("fwhm_main_lobe", estimates_fwhm_main_lobe, save=False)
     report["wavelength"] = wavelength
     res.append(report)
 
-    report = report_neff("fft_label_padded", estimates_fft_label_padded, save=False)
+    report = report_neff(
+        "fwhm_main_lobe_padded", estimates_fwhm_main_lobe_padded, save=False
+    )
     report["wavelength"] = wavelength
     res.append(report)
 
-    report = report_neff("goodman_padded", estimates_goodman, save=False)
+    report = report_neff("auc", estimates_auc, save=False)
     report["wavelength"] = wavelength
     res.append(report)
 
@@ -636,10 +608,11 @@ plt.plot(wavelengths, 4 / wavelengths ** 2, "o", label="theory")
 #%%
 
 df = pd.DataFrame(res)
-# df = df[df.index == "fft"]
 df.index.name = "method"
+# df = df[df.index.isin(["fwhm_main_lobe", "fwhm_main_lobe_padded", "area_main_lobe"])]
 vals = df.reset_index().pivot(index="wavelength", columns="method", values="mean")
 q5 = df.reset_index().pivot(index="wavelength", columns="method", values="q5")
 q95 = df.reset_index().pivot(index="wavelength", columns="method", values="q95")
 yerrs = np.stack((vals - q5, q95 - vals), axis=1).T
 vals.plot(label=".-", logy=True, logx=True, yerr=yerrs, capsize=5)
+plt.axis("auto")

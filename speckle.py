@@ -37,6 +37,7 @@ import pandas as pd
 
 pd.set_option("display.max_columns", None)
 plt.rcParams["image.origin"] = "lower"
+save = True
 #%%
 
 x = np.linspace(0, 1, 200, endpoint=False)
@@ -88,11 +89,11 @@ def make_fields(m, n, wavelength):
     return fields
 
 
+#%% Plot scatterers
 np.random.seed(123)
 field, xp, yp = make_field()
 field_ = np.ravel(field)
 
-#%% Plot scatterers
 plt.figure()
 plt.plot(xp, yp, ".")
 plt.axis("square")
@@ -101,11 +102,24 @@ rect = mpl.patches.Rectangle(
 )
 plt.gca().add_patch(rect)
 plt.title("Scatterers")
+plt.xlabel("x (arbitrary dist)")
+plt.ylabel("y (arbitrary dist)")
+if save:
+    plt.savefig("scatterers")
 
 #%% Plot field
-plt.figure()
-plt.imshow(np.abs(field), extent=(0, 1, 0, 1))
-plt.axis("square")
+for wavelength in [0.01, 0.05, 0.1, 0.2, 0.5]:
+    np.random.seed(123)
+    field, xp, yp = make_field(wavelength=wavelength)
+    plt.figure()
+    plt.imshow(np.abs(field), extent=(0, 1, 0, 1))
+    plt.axis("square")
+    plt.xlabel("x (1)")
+    plt.ylabel("y (1)")
+    plt.title(f"wavelength={wavelength}")
+    wavelength_str = str(wavelength).replace(".", "_")
+    if save:
+        plt.savefig(f"field_wavelength_{wavelength_str}")
 
 #%% == PART A: estimation of sigma
 
@@ -248,6 +262,18 @@ print(report_sigma("rayleigh_ml_best_case", estimates))
 #%% Conclusion part A
 print(all_reports_sigma.T)
 
+all_reports_sigma_df = all_reports_sigma.T.copy()
+all_reports_sigma_df.index.name = "method"
+vals = all_reports_sigma_df["mean"]
+q5 = all_reports_sigma_df["q5"]
+q95 = all_reports_sigma_df["q95"]
+yerrs = np.stack((vals - q5, q95 - vals), axis=1).T
+vals.plot.bar(yerr=yerrs, capsize=5)
+plt.gca().set_xticklabels(vals.index, rotation=45)
+plt.ylabel("estimated sigma")
+if save:
+    plt.savefig("sigma_estimate")
+
 #%% Plot Normal dist
 t = np.linspace(-3 * sigma, +3 * sigma, 100)
 plt.figure()
@@ -344,7 +370,7 @@ plt.hist(estimates, density=True, bins=30)
 print(report_neff("fwhm_main_lobe", estimates))
 
 
-#%% From fft with label and padded
+#%% From FWHM (cutoff 1/e) (main lobe and padded)
 n = 500
 wavelength = 0.1
 m = 200
@@ -364,22 +390,30 @@ plt.hist(estimates, density=True, bins=30)
 
 print(report_neff("fwhm_main_lobe_padded", estimates))
 
-#%% Plot fft autocorr
+#%% Plot FWHM
 plt.figure()
 plt.imshow(np.abs(autocorr_normed), extent=(0, 1, 0, 1))
-plt.title("autocorrelation with fft")
+plt.title("autocorrelation")
+if save:
+    plt.savefig("fwhm_a")
 
 plt.figure()
 plt.imshow(np.abs(autocorr_normed) > 1 / np.e, extent=(0, 1, 0, 1))
-plt.title("autocorrelation with fft")
+plt.title("autocorrelation thresholded with 1/e")
+if save:
+    plt.savefig("fwhm_b")
 
 plt.figure()
 plt.imshow(labels, extent=(0, 1, 0, 1))
-plt.title("autocorrelation with fft")
+plt.title("clusters in thresholded autocorrelation")
+if save:
+    plt.savefig("fwhm_c")
 
 plt.figure()
 plt.imshow(labels == centre_label, extent=(0, 1, 0, 1))
-plt.title("autocorrelation with fft")
+plt.title("main lobe for FWHM")
+if save:
+    plt.savefig("fwhm_d")
 
 
 #%% From variance of Rayleigh sigma ML estimator
@@ -406,8 +440,6 @@ neff = sigma ** 2 / (4 * all_reports_sigma.loc["std", "rayleigh_ml"] ** 2)
 print(report_neff("var_sigma_ml", [neff]))
 
 #%% From dist of maxima (preparation)
-
-
 def rayleigh_logpdf(x):
     return np.log(x) - (x * x) / 2
 
@@ -480,13 +512,14 @@ plt.figure()
 plt.plot(nvect, np.exp(log_likelihood))
 plt.xlabel("effective sample size")
 plt.title(f"maximum likelihood={neff:.0f}")
+if save:
+    plt.savefig("neff_maximas")
 
 # TODO: calculate HPD
 print(report_neff("maximas", [neff]))
 
 
 #%% From area under curve (Goodman // Wagner 1983 eq 31) (unpadded)
-
 n = 500
 wavelength = 0.1
 m = 200
@@ -520,8 +553,6 @@ plt.hist(estimates, density=True, bins=30)
 print(report_neff("auc", estimates))
 
 #%% From area under main lobe
-
-
 def aca_area_main_lobe(field, p=1):
     """
     ACA based on area under main lobe
@@ -566,25 +597,47 @@ plt.hist(estimates, density=True, bins=30)
 
 print(report_neff("area_main_lobe", estimates))
 
-#%% Debug plots
+#%% Plot area under main lobe
 plt.figure()
 plt.imshow(np.abs(autocorr_normed))
 plt.title("autocorr")
+if save:
+    plt.savefig("auc_a")
 
 plt.figure()
 plt.imshow(gradr)
 plt.title("grad_r")
+if save:
+    plt.savefig("auc_b")
 
 plt.figure()
 plt.imshow(gradr <= 0)
-plt.title("grad_r")
+plt.title("grad_r <= 0")
+if save:
+    plt.savefig("auc_c")
 
 plt.figure()
 plt.imshow(main_lobe, extent=(0, 1, 0, 1))
 plt.title("Main lobe")
+if save:
+    plt.savefig("auc_d")
 
 #%% Conclusion part B
 print(all_reports_neff.T)
+report_neff("from_wavelength", [1 / wavelength ** 2])
+
+all_reports_neff_df = all_reports_neff.T.copy()
+all_reports_neff_df.index.name = "method"
+vals = all_reports_neff_df["mean"]
+q5 = all_reports_neff_df["q5"]
+q95 = all_reports_neff_df["q95"]
+yerrs = np.stack((vals - q5, q95 - vals), axis=1).T
+vals.plot.bar(yerr=yerrs, capsize=5)
+plt.gca().set_xticklabels(vals.index, rotation=80)
+plt.ylabel("estimated effective sample size")
+if save:
+    plt.savefig("neff_estimate")
+
 
 #%% == PART C: pretty plots
 
@@ -655,7 +708,7 @@ for k, wavelength in enumerate(wavelengths):
 
 df = pd.DataFrame(res)
 df.index.name = "method"
-# df = df[df.index.isin(["fwhm_main_lobe", "fwhm_main_lobe_padded", "area_main_lobe"])]
+# df = df[df.index.isin(["fwhm_main_lobe"])]
 vals = df.reset_index().pivot(index="wavelength", columns="method", values="mean")
 q5 = df.reset_index().pivot(index="wavelength", columns="method", values="q5")
 q95 = df.reset_index().pivot(index="wavelength", columns="method", values="q95")
@@ -666,3 +719,5 @@ plt.plot(wavelengths, neff_maximas, "-o", label="maximas")
 plt.axis("auto")
 plt.ylabel("effective sample size")
 plt.legend()
+if save:
+    plt.savefig("wavelength_vs_neff")

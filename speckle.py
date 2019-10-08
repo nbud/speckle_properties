@@ -25,14 +25,13 @@ Sources of errors:
 
 
 """
-from scipy import stats
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import numba
 import math
 import tqdm
-from scipy import ndimage
+from scipy import ndimage, stats, optimize
 import functools
 import pandas as pd
 
@@ -406,36 +405,84 @@ print("---")
 neff = sigma ** 2 / (4 * all_reports_sigma.loc["std", "rayleigh_ml"] ** 2)
 print(report_neff("var_sigma_ml", [neff]))
 
+#%% From dist of maxima (preparation)
+
+
+def rayleigh_logpdf(x):
+    return np.log(x) - (x * x) / 2
+
+
+def rayleigh_logcdf(x):
+    return np.log(1 - np.exp(-(x * x) / 2))
+
+
+def maxrayleigh_logpdf(x, n, sigma):
+    """
+    pdf of max of n iid Rayleigh distribution
+    """
+    return (
+        np.log(n)
+        + rayleigh_logpdf(x / sigma)
+        + (n - 1) * rayleigh_logcdf(x / sigma)
+        - np.log(sigma)
+    )
+
+
+def test_maxrayleigh_logpdf():
+    neff = 10
+    sigma = 2.0
+    m = 2000
+    np.random.seed(123)
+    samples = [np.max(stats.rayleigh.rvs(size=neff, scale=sigma)) for i in range(m)]
+    t = np.linspace(1, 10, 100)
+    plt.figure()
+    plt.hist(samples, bins=30, density=True)
+    plt.plot(t, np.exp(maxrayleigh_logpdf(t, neff, sigma)))
+    plt.title("test_maxraleigh_logpdf")
+
+
+test_maxrayleigh_logpdf()
+
 #%% From dist of maxima
-
-# TODO
-
 n = 500
-wavelength = 0.2
-
+wavelength = 0.1
 m = 200
-np.random.seed(123)
-maximas = np.zeros(m)
-for k in tqdm.trange(m):
-    field, xp, yp = make_field(n, wavelength)
-    maximas[k] = np.max(np.abs(field))
-
-# around 400 for wavelength=0.2
-# around 2000 for wavelength=0.1
-
-t = np.linspace(0, 1.5 * maximas.max(), 200)
 
 
-def maxrayleigh_pdf(t, n):
-    dist = stats.rayleigh(scale=sigma)
-    return n * dist.cdf(t) ** (n - 1) * dist.pdf(t)
+def neff_maxima_method(fields):
+    m = len(fields)
+    maximas = np.zeros(m)
+    for k, field in enumerate(fields):
+        field = make_subfield(field)
+        maximas[k] = np.max(np.abs(field))
+
+    # Calculate max likelihood
+    likelihood_func = lambda n: -maxrayleigh_logpdf(maximas, n, sigma).sum()
+    res = optimize.minimize_scalar(
+        likelihood_func, bounds=(1, xx.size), method="bounded"
+    )
+    assert res.success
+    neff = res.x
+    q5 = None  # TODO
+    q95 = None  # TODO
+    return neff, q5, q95, maximas
 
 
+fields = make_fields(m, n, wavelength)
+neff, q5, q95, maximas = neff_maxima_method(fields)
+
+# Plot
+nvect = np.arange(1, 10000, 10)
+log_likelihood = maxrayleigh_logpdf(
+    maximas[np.newaxis], nvect[..., np.newaxis], sigma
+).sum(axis=-1)
 plt.figure()
-plt.hist(maximas, density=True, bins=20)
-# plt.plot(t, maxrayleigh_pdf(t, 400))
-# plt.plot(t, maxrayleigh_pdf(t, 2000))
-plt.plot(t, maxrayleigh_pdf(t, 400))
+plt.plot(nvect, np.exp(log_likelihood))
+plt.xlabel("effective sample size")
+plt.title(f"maximum likelihood={neff:.0f}")
+
+# TODO: calculate HPD
+print(report_neff("maximas", [neff]))
 
 
 #%% From area under curve (Goodman // Wagner 1983 eq 31) (unpadded)
@@ -541,7 +588,7 @@ print(all_reports_neff.T)
 
 #%% == PART C: pretty plots
 
-#%% ACA estimates vs wavelength
+#%% Effective sample size vs wavelength
 
 n = 500
 wavelengths = np.array([0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5])
@@ -597,15 +644,14 @@ for wavelength in tqdm.tqdm(wavelengths):
     report["wavelength"] = wavelength
     res.append(report)
 
-#%% ACA FFT vs wavelength - Plot
-df = pd.DataFrame(res)
-df.index.name = "method"
-df.reset_index().pivot(index="wavelength", columns="method", values="mean").plot(
-    logy=True, logx=True
-)
-plt.plot(wavelengths, 4 / wavelengths ** 2, "o", label="theory")
+#%% Effective sample size estimates which based on a series of fields
+neff_maximas = np.zeros(len(wavelengths))
+for k, wavelength in enumerate(wavelengths):
+    fields = make_fields(m, n, wavelength)
+    neff, _, _, _ = neff_maxima_method(fields)
+    neff_maximas[k] = neff
 
-#%%
+#%% Plot effective sample size vs wavelength
 
 df = pd.DataFrame(res)
 df.index.name = "method"
@@ -615,4 +661,8 @@ q5 = df.reset_index().pivot(index="wavelength", columns="method", values="q5")
 q95 = df.reset_index().pivot(index="wavelength", columns="method", values="q95")
 yerrs = np.stack((vals - q5, q95 - vals), axis=1).T
 vals.plot(label=".-", logy=True, logx=True, yerr=yerrs, capsize=5)
+plt.plot(wavelengths, 1 / wavelengths ** 2, "k--", label="neff=1/wavelength^2")
+plt.plot(wavelengths, neff_maximas, "-o", label="maximas")
 plt.axis("auto")
+plt.ylabel("effective sample size")
+plt.legend()

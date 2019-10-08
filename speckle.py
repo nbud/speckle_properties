@@ -18,6 +18,11 @@ Final method: FFT padded + label identification
 ACA ~ (wavelength / 2)^2
 Number of unique points ~ 1/(wavelength / 2)^2
 
+Sources of errors:
+    - Wavelength too small: discretisation becomes too rough
+    - Wavelength too large: measured area becomes too small to be
+      statistically representative
+
 
 """
 from scipy import stats
@@ -32,6 +37,7 @@ import functools
 import pandas as pd
 
 pd.set_option("display.max_columns", None)
+plt.rcParams["image.origin"] = "lower"
 #%%
 
 x = np.linspace(0, 1, 200, endpoint=False)
@@ -445,12 +451,16 @@ plt.plot(t, maxrayleigh_pdf(t, 400))
 
 
 #%% From Goodman // Wagner 1983 eq 31 (unpadded)
+
 n = 500
 wavelength = 0.1
 m = 200
 
 
 def aca_goodman(field, p=1):
+    """
+    ACA based on total area under autocorrelation curve
+    """
     field = make_subfield(field)
     Z = np.fft.fft2(field, (p * field.shape[0], p * field.shape[1]))
     _autocorr = np.fft.ifft2(Z * np.conj(Z))
@@ -492,6 +502,69 @@ plt.hist(estimates, density=True, bins=30)
 
 print(report_neff("goodman_padded", estimates))
 
+#%% From area under main lobe
+
+
+def aca_area_main_lobe(field, p=1):
+    """
+    ACA based on area under main lobe
+    
+    """
+    field = make_subfield(field)
+    Z = np.fft.fft2(field, (p * field.shape[0], p * field.shape[1]))
+    _autocorr = np.fft.ifft2(Z * np.conj(Z))
+    autocorr = np.fft.fftshift(_autocorr)
+    autocorr_normed = autocorr / _autocorr[0, 0].real
+    grady, gradx = np.gradient(np.abs(autocorr_normed))
+    fx = np.fft.fftshift(np.fft.fftfreq(Z.shape[0], dx))
+    fy = np.fft.fftshift(np.fft.fftfreq(Z.shape[1], dy))
+    fxx, fyy = np.meshgrid(fx, fy)
+    phi = np.arctan2(fyy, fxx)
+    gradr = gradx * np.cos(phi) + grady * np.sin(phi)
+    # the centre is sometime shaky: fix it
+    gradr[gradr.shape[0] // 2, gradr.shape[1] // 2] = 0.0
+    labels, _ = ndimage.measurements.label(gradr <= 0)
+    centre_label = labels[labels.shape[0] // 2, labels.shape[1] // 2]
+    main_lobe = labels == centre_label
+    aca = np.sum(main_lobe) * dx * dy
+    return aca, autocorr_normed, gradr, main_lobe
+
+
+n = 500
+wavelength = 0.1
+m = 200
+
+p = 2
+
+
+estimates = np.zeros(m)
+fields = make_fields(m, n, wavelength)
+for k, field in enumerate(tqdm.tqdm(fields)):
+    field = make_subfield(field)
+    aca, autocorr_normed, gradr, main_lobe = aca_area_main_lobe(field, p)
+    estimates[k] = 1 / aca
+
+plt.figure()
+plt.hist(estimates, density=True, bins=30)
+
+print(report_neff("area_main_lobe", estimates))
+
+#%% Debug plots
+plt.figure()
+plt.imshow(np.abs(autocorr_normed))
+plt.title("autocorr")
+
+plt.figure()
+plt.imshow(gradr)
+plt.title("grad_r")
+
+plt.figure()
+plt.imshow(gradr <= 0)
+plt.title("grad_r")
+
+plt.figure()
+plt.imshow(main_lobe, extent=(0, 1, 0, 1))
+plt.title("Main lobe")
 
 #%% Conclusion part B
 print(all_reports_neff.T)
@@ -513,6 +586,7 @@ for wavelength in tqdm.tqdm(wavelengths):
     estimates_fft_label = np.zeros(m)
     estimates_fft_label_padded = np.zeros(m)
     estimates_goodman = np.zeros(m)
+    estimates_area_main_lobe = np.zeros(m)
     fields = make_fields(m, n, wavelength)
     for k, field in enumerate(fields):
         field = make_subfield(field)
@@ -527,6 +601,9 @@ for wavelength in tqdm.tqdm(wavelengths):
 
         aca = aca_goodman(field, p)
         estimates_goodman[k] = 1 / aca
+
+        aca, _, _, _ = aca_area_main_lobe(field, p)
+        estimates_area_main_lobe[k] = 1 / aca
 
     report = report_neff("fft", estimates_fft, save=False)
     report["wavelength"] = wavelength
@@ -544,6 +621,10 @@ for wavelength in tqdm.tqdm(wavelengths):
     report["wavelength"] = wavelength
     res.append(report)
 
+    report = report_neff("area_main_lobe", estimates_area_main_lobe, save=False)
+    report["wavelength"] = wavelength
+    res.append(report)
+
 #%% ACA FFT vs wavelength - Plot
 df = pd.DataFrame(res)
 df.index.name = "method"
@@ -551,3 +632,14 @@ df.reset_index().pivot(index="wavelength", columns="method", values="mean").plot
     logy=True, logx=True
 )
 plt.plot(wavelengths, 4 / wavelengths ** 2, "o", label="theory")
+
+#%%
+
+df = pd.DataFrame(res)
+# df = df[df.index == "fft"]
+df.index.name = "method"
+vals = df.reset_index().pivot(index="wavelength", columns="method", values="mean")
+q5 = df.reset_index().pivot(index="wavelength", columns="method", values="q5")
+q95 = df.reset_index().pivot(index="wavelength", columns="method", values="q95")
+yerrs = np.stack((vals - q5, q95 - vals), axis=1).T
+vals.plot(label=".-", logy=True, logx=True, yerr=yerrs, capsize=5)

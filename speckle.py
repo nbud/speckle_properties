@@ -1,21 +1,22 @@
 # -*- coding: utf-8 -*-
 """
-Generate speckle Z = X + i J
+Generate speckle by convolving the PSF to a random field
 
-Results:
-    Abs(Z) is Rayleigh(Sigma)
-    X is normally distribution Norm(0, Sigma^2) (but the variance is wiggly)
+The convolution is done by a multiplication in the Fourier domain. Limits:
+    - the random field coincides with the pixel grid
+    - the pixel size must be larger than the wavelength
+
+Results: Abs(Z) is Rayleigh(Sigma) X is normally distribution Norm(0, Sigma^2)
+    (but the variance is wiggly)
 
 
-Method 1: FFT and threshold at 1/e
-The correlation length is around half the wavelength
-Fundamental flaw: catches not only the main cluster by further one
+Method 1: FFT and threshold at 1/e The correlation length is around half the
+wavelength Fundamental flaw: catches not only the main cluster by further one
 
 
 Padding the FFT reduces the variance of the ACA
 
-Final method: FFT padded + label identification
-ACA ~ (wavelength / 2)^2
+Final method: FFT padded + label identification ACA ~ (wavelength / 2)^2
 Number of unique points ~ 1/(wavelength / 2)^2
 
 Sources of errors:
@@ -28,8 +29,6 @@ Sources of errors:
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-import numba
-import math
 import tqdm
 from scipy import ndimage, stats, optimize
 import functools
@@ -38,8 +37,8 @@ import pandas as pd
 pd.set_option("display.max_columns", None)
 plt.rcParams["image.origin"] = "lower"
 save = True
-#%%
-
+#%% Init
+# Measurement area
 x = np.linspace(0, 1, 200, endpoint=False)
 y = np.linspace(0, 1, 200, endpoint=False)
 dx = x[1] - x[0]
@@ -47,70 +46,62 @@ dy = y[1] - y[0]
 xx, yy = np.meshgrid(x, y)
 sigma = 1.0
 
-
-@numba.njit(parallel=True)
-def _make_field(xx, yy, xp, yp, complex_amps, wavelength):
-    res = np.zeros(xx.shape, np.complex_)
-    for i in numba.prange(xx.shape[0]):
-        for j in range(xx.shape[1]):
-            for k in range(xp.shape[0]):
-                r = math.sqrt((xx[i, j] - xp[k]) ** 2 + (yy[i, j] - yp[k]) ** 2)
-                res[i, j] += complex_amps[k] * np.exp(2j * np.pi / wavelength * r)
-    return res
+# Speckle generation area (larger to avoid border effect)
+x_ext = np.linspace(-1, 2, 3 * len(x), endpoint=False)
+y_ext = np.linspace(-1, 2, 3 * len(y), endpoint=False)
+# x_ext = (np.arange(512) - 256) * dx
+# y_ext = (np.arange(512) - 256) * dy
+xx_ext, yy_ext = np.meshgrid(x_ext, y_ext)
+r = np.sqrt((xx_ext - 0.5) ** 2 + (yy_ext - 0.5) ** 2)
 
 
-def make_field(n=500, wavelength=0.1):
-    rootn = np.sqrt(n)
-
-    xp = stats.uniform(-1, 3.0).rvs(size=n)
-    yp = stats.uniform(-1, 3.0).rvs(size=n)
-
-    complex_amps = stats.norm(scale=sigma / rootn).rvs(2 * n).view(np.complex_)
+def make_field(wavelength=0.1):
     """
-    plt.figure()
-    plt.hist(complex_amps.real, bins=30, density=True)
-    plt.hist(complex_amps.imag, bins=30, density=True)
-    t = np.linspace(-3/rootn, 3/rootn)
-    plt.plot(t, stats.norm(scale=sigma/rootn).pdf(t))
+    Generate speckle in Fourier domain
+    Valid as long as the pixel size is way smaller than the wavelength
     """
+    psf = np.exp(2j * np.pi / wavelength * r)
+    # psf = np.exp(2j * np.pi / wavelength * r) * np.exp(-(r / (2 * wavelength))**2)
 
-    field = _make_field(xx, yy, xp, yp, complex_amps, wavelength)
+    random_field = (
+        stats.norm(scale=sigma / np.sqrt(xx_ext.size))
+        .rvs(2 * xx_ext.size)
+        .view(np.complex_)
+        .reshape(xx_ext.shape)
+    )
+    speckle_ext = np.fft.ifft2(np.fft.fft2(psf) * np.fft.fft2(random_field))
+    speckle = speckle_ext[len(x) : 2 * len(x), len(y) : 2 * len(y)]
 
-    return field, xp, yp
+    return speckle, random_field
 
 
 @functools.lru_cache(maxsize=100, typed=False)
-def make_fields(m, n, wavelength):
-    np.random.seed(123)
+def make_fields(m, wavelength, seed=123):
+    np.random.seed(seed)
     fields = np.zeros((m, len(x), len(y)), np.complex_)
-    for k in tqdm.trange(m):
-        field, _, _ = make_field(n, wavelength)
+    for k in tqdm.trange(m, desc="Generate fields"):
+        field, _ = make_field(wavelength)
         fields[k] = field
     return fields
 
 
-#%% Plot scatterers
+#%% Plot random field
 np.random.seed(123)
-field, xp, yp = make_field()
-field_ = np.ravel(field)
+field, random_field = make_field()
 
 plt.figure()
-plt.plot(xp, yp, ".")
-plt.axis("square")
+plt.imshow(np.real(random_field), extent=(-1, 2, -1, 2), cmap="Greys")
 rect = mpl.patches.Rectangle(
     (0, 0), 1, 1, linewidth=1, edgecolor="C1", facecolor="none"
 )
 plt.gca().add_patch(rect)
-plt.title("Scatterers")
-plt.xlabel("x (arbitrary dist)")
-plt.ylabel("y (arbitrary dist)")
 if save:
-    plt.savefig("scatterers")
+    plt.savefig("random_field")
 
 #%% Plot field
 for wavelength in [0.01, 0.05, 0.1, 0.2, 0.5]:
     np.random.seed(123)
-    field, xp, yp = make_field(wavelength=wavelength)
+    field, _ = make_field(wavelength)
     plt.figure()
     plt.imshow(np.abs(field), extent=(0, 1, 0, 1))
     plt.axis("square")
@@ -124,6 +115,8 @@ for wavelength in [0.01, 0.05, 0.1, 0.2, 0.5]:
 #%% == PART A: estimation of sigma
 
 all_reports_sigma = pd.DataFrame()
+wavelength = 0.1
+m = 200
 
 
 def report_sigma(method_name, estimates):
@@ -147,12 +140,8 @@ def make_subfield(field):
 
 
 #%% From real part of pixels
-n = 500
-wavelength = 0.1
-
-m = 200
 estimates = np.zeros(m)
-fields = make_fields(m, n, wavelength)
+fields = make_fields(m, wavelength)
 for k, field in enumerate(fields):
     field = make_subfield(field)
     estimates[k] = np.std(field.real)
@@ -162,12 +151,8 @@ plt.hist(estimates, density=True, bins=20)
 print(report_sigma("std_real", estimates))
 
 #%% From real part of pixels - bis
-n = 500
-wavelength = 0.1
-
-m = 200
 estimates = np.zeros(m)
-fields = make_fields(m, n, wavelength)
+fields = make_fields(m, wavelength)
 for k, field in enumerate(fields):
     field = make_subfield(field)
     estimates[k] = np.sqrt(np.mean(field.real ** 2))
@@ -177,12 +162,8 @@ plt.hist(estimates, density=True, bins=20)
 print(report_sigma("std_real2", estimates))
 
 #%% From RMS (Rayleigh max lihelihood)
-n = 500
-wavelength = 0.1
-
-m = 200
 estimates = np.zeros(m)
-fields = make_fields(m, n, wavelength)
+fields = make_fields(m, wavelength)
 for k, field in enumerate(fields):
     field = make_subfield(field)
     estimates[k] = np.sqrt(np.mean(np.abs(field) ** 2)) / np.sqrt(2)
@@ -192,12 +173,8 @@ plt.hist(estimates, density=True, bins=20)
 print(report_sigma("rayleigh_ml", estimates))
 
 #%% From RMS (Rayleigh max lihelihood) + bootstrap
-n = 500
-wavelength = 0.1
-
-m = 200
 estimates = np.zeros(m)
-fields = make_fields(m, n, wavelength)
+fields = make_fields(m, wavelength)
 np.random.seed(123)
 for k, field in enumerate(tqdm.tqdm(fields)):
     field = make_subfield(field)
@@ -216,12 +193,8 @@ print(report_sigma("rayleigh_ml_boot", estimates))
 
 #%% From mean of Rayleigh
 # theoretically suboptimal but why not
-n = 500
-wavelength = 0.1
-
-m = 200
 estimates = np.zeros(m)
-fields = make_fields(m, n, wavelength)
+fields = make_fields(m, wavelength)
 for k, field in enumerate(fields):
     field = make_subfield(field)
     estimates[k] = np.mean(np.abs(field)) * np.sqrt(2 / np.pi)
@@ -234,12 +207,8 @@ print(report_sigma("rayleigh_mean", estimates))
 # See Siddiqui 1964
 
 k_opt = round(0.79681 * (xx.size + 1) - 0.39841 + 1.16312 / (xx.size + 1))
-n = 500
-wavelength = 0.1
-
-m = 200
 estimates = np.zeros(m)
-fields = make_fields(m, n, wavelength)
+fields = make_fields(m, wavelength)
 for k, field in enumerate(fields):
     field = make_subfield(field)
     _field = np.sort(np.ravel(np.abs(field) ** 2))
@@ -251,10 +220,9 @@ print(report_sigma("rayleigh_order", estimates))
 
 
 #%% Rayleigh ML if we were independant
-m = 200
 estimates = np.zeros(m)
 for k in range(m):
-    field = stats.rayleigh(scale=1).rvs(xx.size)
+    field = stats.rayleigh(scale=sigma).rvs(xx.size)
     field = make_subfield(field)
     estimates[k] = np.sqrt(np.mean(np.abs(field) ** 2)) / np.sqrt(2)
 print(report_sigma("rayleigh_ml_best_case", estimates))
@@ -275,20 +243,21 @@ if save:
     plt.savefig("sigma_estimate")
 
 #%% Plot Normal dist
+field, _ = make_field(wavelength)
 t = np.linspace(-3 * sigma, +3 * sigma, 100)
 plt.figure()
-plt.hist(field_.real, density=True, bins=30)
+plt.hist(np.ravel(field).real, density=True, bins=30)
 plt.plot(t, stats.norm(scale=sigma).pdf(t), label="Norm(0, Sigma^2)")
 plt.legend()
 
 #%% Plot Rayleigh dist
-rms = np.sqrt(np.mean(np.abs(field_) ** 2))
-
+field, _ = make_field(wavelength)
+rms = np.sqrt(np.mean(np.abs(field) ** 2))
 rayleigh = stats.rayleigh(scale=sigma)
 fitte_drayleigh = stats.rayleigh(scale=rms / np.sqrt(2))
 t = np.linspace(0, rayleigh.ppf(0.9999), 100)
 plt.figure()
-plt.hist(np.abs(field_), bins=30, density=True)
+plt.hist(np.abs(np.ravel(field)), bins=30, density=True)
 plt.plot(t, rayleigh.pdf(t), label="Rayleigh(sigma)")
 plt.plot(t, fitte_drayleigh.pdf(t), label="Fitted Rayleigh")
 plt.legend()
@@ -296,6 +265,8 @@ plt.legend()
 #%% == PART B: estimation of effective sample size
 
 all_reports_neff = pd.DataFrame()
+wavelength = 0.1
+m = 200
 
 
 def report_neff(method_name, estimates, save=True):
@@ -314,11 +285,6 @@ def report_neff(method_name, estimates, save=True):
 
 
 #%% From FWHM (cutoff 1/e) (all lobes)
-n = 500
-wavelength = 0.1
-m = 200
-
-
 def aca_fwhm(field):
     Z = np.fft.fft2(field)
     _autocorr = np.fft.ifft2(Z * np.conj(Z))
@@ -329,7 +295,7 @@ def aca_fwhm(field):
 
 
 estimates = np.zeros(m)
-fields = make_fields(m, n, wavelength)
+fields = make_fields(m, wavelength)
 for k, field in enumerate(tqdm.tqdm(fields)):
     field = make_subfield(field)
     aca, autocorr_normed = aca_fwhm(field)
@@ -341,11 +307,6 @@ plt.hist(estimates, density=True, bins=30)
 print(report_neff("fwhm", estimates))
 
 #%% From FWHM (cutoff 1/e) (main lobe)
-n = 500
-wavelength = 0.1
-m = 200
-
-
 def aca_fwhm_main_lobe(field, p=1):
     Z = np.fft.fft2(field, (p * field.shape[0], p * field.shape[1]))
     _autocorr = np.fft.ifft2(Z * np.conj(Z))
@@ -358,7 +319,7 @@ def aca_fwhm_main_lobe(field, p=1):
 
 
 estimates = np.zeros(m)
-fields = make_fields(m, n, wavelength)
+fields = make_fields(m, wavelength)
 for k, field in enumerate(tqdm.tqdm(fields)):
     field = make_subfield(field)
     aca, autocorr_normed, labels, centre_label = aca_fwhm_main_lobe(field)
@@ -371,15 +332,11 @@ print(report_neff("fwhm_main_lobe", estimates))
 
 
 #%% From FWHM (cutoff 1/e) (main lobe and padded)
-n = 500
-wavelength = 0.1
-m = 200
-
 # padding factor
 p = 2
 
 estimates = np.zeros(m)
-fields = make_fields(m, n, wavelength)
+fields = make_fields(m, wavelength)
 for k, field in enumerate(tqdm.tqdm(fields)):
     field = make_subfield(field)
     aca, autocorr_normed, labels, centre_label = aca_fwhm_main_lobe(field, p)
@@ -421,11 +378,11 @@ if save:
 # from http://ocw.mit.edu/ans7870/18/18.443/s15/projects/Rproject3_rmd_rayleigh_theory.html
 
 # Numerical validation of Var(sigma ML estimator) = sigma^2 / (4 n)
-m = 1000
+_m = 1000
 neff = 50
-sigma_estimates = np.zeros(m)
+sigma_estimates = np.zeros(_m)
 np.random.seed(123)
-for k in range(m):
+for k in range(_m):
     field = stats.rayleigh(scale=sigma).rvs(size=neff)
     sigma_estimates[k] = np.sqrt(np.mean(np.abs(field) ** 2)) / np.sqrt(2)
 print("---")
@@ -476,11 +433,6 @@ def test_maxrayleigh_logpdf():
 test_maxrayleigh_logpdf()
 
 #%% From dist of maxima
-n = 500
-wavelength = 0.1
-m = 200
-
-
 def neff_maxima_method(fields):
     m = len(fields)
     maximas = np.zeros(m)
@@ -500,7 +452,7 @@ def neff_maxima_method(fields):
     return neff, q5, q95, maximas
 
 
-fields = make_fields(m, n, wavelength)
+fields = make_fields(m, wavelength)
 neff, q5, q95, maximas = neff_maxima_method(fields)
 
 # Plot
@@ -520,13 +472,6 @@ print(report_neff("maximas", [neff]))
 
 
 #%% From area under curve (Goodman // Wagner 1983 eq 31) (unpadded)
-n = 500
-wavelength = 0.1
-m = 200
-
-p = 2
-
-
 def aca_auc(field, p=1):
     """
     ACA based on total area under autocorrelation curve
@@ -540,8 +485,9 @@ def aca_auc(field, p=1):
     return aca
 
 
+p = 2
 estimates = np.zeros(m)
-fields = make_fields(m, n, wavelength)
+fields = make_fields(m, wavelength)
 for k, field in enumerate(tqdm.tqdm(fields)):
     field = make_subfield(field)
     aca = aca_auc(field, p=1)
@@ -578,15 +524,9 @@ def aca_area_main_lobe(field, p=1):
     return aca, autocorr_normed, gradr, main_lobe
 
 
-n = 500
-wavelength = 0.1
-m = 200
-
 p = 2
-
-
 estimates = np.zeros(m)
-fields = make_fields(m, n, wavelength)
+fields = make_fields(m, wavelength)
 for k, field in enumerate(tqdm.tqdm(fields)):
     field = make_subfield(field)
     aca, autocorr_normed, gradr, main_lobe = aca_area_main_lobe(field, p)
@@ -643,7 +583,6 @@ if save:
 
 #%% Effective sample size vs wavelength
 
-n = 500
 wavelengths = np.array([0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5])
 m = 200
 
@@ -657,7 +596,7 @@ for wavelength in tqdm.tqdm(wavelengths):
     estimates_fwhm_main_lobe_padded = np.zeros(m)
     estimates_auc = np.zeros(m)
     estimates_area_main_lobe = np.zeros(m)
-    fields = make_fields(m, n, wavelength)
+    fields = make_fields(m, wavelength)
     for k, field in enumerate(fields):
         field = make_subfield(field)
         aca, _ = aca_fwhm(field)
@@ -700,7 +639,7 @@ for wavelength in tqdm.tqdm(wavelengths):
 #%% Effective sample size estimates which based on a series of fields
 neff_maximas = np.zeros(len(wavelengths))
 for k, wavelength in enumerate(wavelengths):
-    fields = make_fields(m, n, wavelength)
+    fields = make_fields(m, wavelength)
     neff, _, _, _ = neff_maxima_method(fields)
     neff_maximas[k] = neff
 
@@ -708,7 +647,7 @@ for k, wavelength in enumerate(wavelengths):
 
 df = pd.DataFrame(res)
 df.index.name = "method"
-# df = df[df.index.isin(["fwhm_main_lobe"])]
+# df = df[df.index.isin(["fwhm_main_lobe_padded"])]
 vals = df.reset_index().pivot(index="wavelength", columns="method", values="mean")
 q5 = df.reset_index().pivot(index="wavelength", columns="method", values="q5")
 q95 = df.reset_index().pivot(index="wavelength", columns="method", values="q95")

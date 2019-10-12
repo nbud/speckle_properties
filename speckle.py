@@ -660,3 +660,74 @@ plt.ylabel("effective sample size")
 plt.legend()
 if save:
     plt.savefig("wavelength_vs_neff")
+
+
+#%% == PART D: determine extremal index
+
+#%% For one (plot and debug)
+m = 200
+wavelength = 0.05
+fields = make_fields(m, wavelength)
+maximas = np.zeros(m)
+for k, field in enumerate(fields):
+    field = make_subfield(field)
+    maximas[k] = np.max(np.abs(field))
+    # maximas[k] = np.max(stats.rayleigh(scale=sigma).rvs(xx.size))  # debug
+
+a = sigma / np.sqrt(2 * np.log(field.size))
+b = sigma * np.sqrt(2 * np.log(field.size))
+
+# debug
+# maximas = stats.gumbel_r(loc=b, scale=a).rvs(m)
+
+# maximum likelihood of a gumbel distribution
+log_theta = -np.log(np.mean(np.exp(-(maximas - b) / a)))
+theta = np.exp(log_theta)
+print(f"theta={theta}")
+
+## Equivalent. mu = a * log_theta + b
+# mu = -a * np.log(np.mean(np.exp(-maximas / a)))
+# log_theta_ = (mu - b) / a
+# theta_ = np.exp(log_theta_)
+# print(f"theta_={theta_}")
+
+print(f"Experimental mean: {np.mean(maximas)}")
+print(f"Th. mean inc. theta: {a * (log_theta + np.euler_gamma) + b}")
+print(f"Th. mean if iid: {np.euler_gamma * a + b}")
+
+#%%
+t = np.linspace(3.4, 6, 200)
+plt.figure()
+plt.hist(maximas, bins=20, density=True, label="Experimental maxima")
+plt.plot(
+    t, stats.gumbel_r.pdf(t, loc=b + a * log_theta, scale=a), label="Gumbel (fitted)"
+)
+plt.plot(t, stats.gumbel_r.pdf(t, loc=b, scale=a), label="Gumbel (iid)")
+plt.title(f"wavelength={wavelength}")
+plt.legend()
+if save:
+    plt.savefig("fitted_gumbel")
+
+#%%
+wavelengths = np.array([0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5])
+log_thetas = []
+for wavelength in tqdm.tqdm(wavelengths):
+    fields = make_fields(m, wavelength)
+    maximas = np.zeros(m)
+    for k, field in enumerate(fields):
+        field = make_subfield(field)
+        maximas[k] = np.max(np.abs(field))
+    a = sigma / np.sqrt(2 * np.log(field.size))
+    b = sigma * np.sqrt(2 * np.log(field.size))
+    log_theta = -np.log(np.mean(np.exp(-(maximas - b) / a)))
+    log_thetas.append(log_theta)
+log_thetas = np.array(log_thetas)
+thetas = np.exp(log_thetas)
+
+#%%
+plt.figure()
+plt.loglog(wavelengths, thetas, ".-")
+plt.ylabel("extremal index")
+plt.xlabel("wavelength")
+if save:
+    plt.savefig("extremal_index")

@@ -26,6 +26,7 @@ Sources of errors:
 
 
 """
+import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -34,9 +35,22 @@ from scipy import ndimage, stats, optimize
 import functools
 import pandas as pd
 
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("-s", "--save", action="store_true", default=False)
+parser.add_argument("--paper", action="store_true", default=False)
+args = parser.parse_args()
+save = args.save
+is_paper = args.paper
+
 pd.set_option("display.max_columns", None)
 plt.rcParams["image.origin"] = "lower"
-save = True
+if is_paper:
+    plt.rcParams["savefig.format"] = "pdf"
+    
+if is_paper:
+    FIGSIZE_HALF_SQUARE = (3.3, 3.3)
+else:
+    FIGSIZE_HALF_SQUARE = None
 #%% Init
 # Measurement area
 x = np.linspace(0, 1, 200, endpoint=False)
@@ -85,29 +99,47 @@ def make_fields(m, wavelength, seed=123):
     return fields
 
 
-#%% Plot random field
+#%% Plot random field, psf, speckle
+wavelength = 0.1
 np.random.seed(123)
-field, random_field = make_field()
+field, random_field = make_field(wavelength)
 
-plt.figure()
-plt.imshow(np.real(random_field), extent=(-1, 2, -1, 2), cmap="Greys")
+plt.figure(figsize=FIGSIZE_HALF_SQUARE)
+plt.imshow(
+    np.real(random_field), extent=(-1, 2, -1, 2), cmap="Greys", interpolation="none"
+)
 rect = mpl.patches.Rectangle(
     (0, 0), 1, 1, linewidth=1, edgecolor="C1", facecolor="none"
 )
 plt.gca().add_patch(rect)
+plt.xlabel("x")
+plt.ylabel("y")
 if save:
     plt.savefig("random_field")
+
+psf = np.exp(2j * np.pi / wavelength * r)
+plt.figure(figsize=FIGSIZE_HALF_SQUARE)
+plt.imshow(np.real(psf), extent=(-1, 2, -1, 2), cmap="Greys", interpolation="none")
+rect = mpl.patches.Rectangle(
+    (0, 0), 1, 1, linewidth=1, edgecolor="C1", facecolor="none"
+)
+plt.gca().add_patch(rect)
+plt.xlabel("x")
+plt.ylabel("y")
+if save:
+    plt.savefig("psf")
 
 #%% Plot field
 for wavelength in [0.01, 0.05, 0.1, 0.2, 0.5]:
     np.random.seed(123)
     field, _ = make_field(wavelength)
-    plt.figure()
+    plt.figure(figsize=FIGSIZE_HALF_SQUARE)
     plt.imshow(np.abs(field), extent=(0, 1, 0, 1))
     plt.axis("square")
-    plt.xlabel("x (1)")
-    plt.ylabel("y (1)")
-    plt.title(f"wavelength={wavelength}")
+    plt.xlabel("x")
+    plt.ylabel("y")
+    if not is_paper:
+        plt.title(f"wavelength={wavelength}")
     wavelength_str = str(wavelength).replace(".", "_")
     if save:
         plt.savefig(f"field_wavelength_{wavelength_str}")
@@ -225,20 +257,27 @@ for k in range(m):
     field = stats.rayleigh(scale=sigma).rvs(xx.size)
     field = make_subfield(field)
     estimates[k] = np.sqrt(np.mean(np.abs(field) ** 2)) / np.sqrt(2)
-print(report_sigma("rayleigh_ml_best_case", estimates))
+print(report_sigma("rayleigh_ml_if_iid", estimates))
 
 #%% Conclusion part A
 print(all_reports_sigma.T)
+if save:
+    all_reports_sigma.to_csv("sigma.csv")
 
 all_reports_sigma_df = all_reports_sigma.T.copy()
 all_reports_sigma_df.index.name = "method"
+all_reports_sigma_df = all_reports_sigma_df.loc[
+    ["std_real", "rayleigh_ml", "rayleigh_mean", "rayleigh_order", "rayleigh_ml_if_iid"]
+]
 vals = all_reports_sigma_df["mean"]
 q5 = all_reports_sigma_df["q5"]
 q95 = all_reports_sigma_df["q95"]
 yerrs = np.stack((vals - q5, q95 - vals), axis=1).T
+plt.figure(figsize=(6.4, 2.))
 vals.plot.bar(yerr=yerrs, capsize=5)
 plt.gca().set_xticklabels(vals.index, rotation=45)
 plt.ylabel("estimated sigma")
+plt.ylim([0.8, 1.15])
 if save:
     plt.savefig("sigma_estimate")
 
@@ -348,27 +387,51 @@ plt.hist(estimates, density=True, bins=30)
 print(report_neff("fwhm_main_lobe_padded", estimates))
 
 #%% Plot FWHM
-plt.figure()
+plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(np.abs(autocorr_normed), extent=(0, 1, 0, 1))
-plt.title("autocorrelation")
+plt.xlabel("x")
+plt.ylabel("y")
+if is_paper:
+    plt.xlim([0.25, 0.75])
+    plt.ylim([0.25, 0.75])
+if not is_paper:
+    plt.title("autocorrelation")
 if save:
     plt.savefig("fwhm_a")
 
-plt.figure()
+plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(np.abs(autocorr_normed) > 1 / np.e, extent=(0, 1, 0, 1))
-plt.title("autocorrelation thresholded with 1/e")
+plt.xlabel("x")
+plt.ylabel("y")
+if is_paper:
+    plt.xlim([0.25, 0.75])
+    plt.ylim([0.25, 0.75])
+if not is_paper:
+    plt.title("autocorrelation thresholded with 1/e")
 if save:
     plt.savefig("fwhm_b")
 
-plt.figure()
+plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(labels, extent=(0, 1, 0, 1))
-plt.title("clusters in thresholded autocorrelation")
+plt.xlabel("x")
+plt.ylabel("y")
+if is_paper:
+    plt.xlim([0.25, 0.75])
+    plt.ylim([0.25, 0.75])
+if not is_paper:
+    plt.title("clusters in thresholded autocorrelation")
 if save:
     plt.savefig("fwhm_c")
 
-plt.figure()
+plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(labels == centre_label, extent=(0, 1, 0, 1))
-plt.title("main lobe for FWHM")
+plt.xlabel("x")
+plt.ylabel("y")
+if is_paper:
+    plt.xlim([0.25, 0.75])
+    plt.ylim([0.25, 0.75])
+if not is_paper:
+    plt.title("main lobe for FWHM")
 if save:
     plt.savefig("fwhm_d")
 
@@ -463,12 +526,13 @@ log_likelihood = maxrayleigh_logpdf(
 plt.figure()
 plt.plot(nvect, np.exp(log_likelihood))
 plt.xlabel("effective sample size")
-plt.title(f"maximum likelihood={neff:.0f}")
+if not is_paper:
+    plt.title(f"maximum likelihood={neff:.0f}")
 if save:
     plt.savefig("neff_maximas")
 
 # TODO: calculate HPD
-print(report_neff("maximas", [neff]))
+print(report_neff("maxima", [neff]))
 
 
 #%% From area under curve (Goodman // Wagner 1983 eq 31) (unpadded)
@@ -538,40 +602,69 @@ plt.hist(estimates, density=True, bins=30)
 print(report_neff("area_main_lobe", estimates))
 
 #%% Plot area under main lobe
-plt.figure()
-plt.imshow(np.abs(autocorr_normed))
-plt.title("autocorr")
+plt.figure(figsize=FIGSIZE_HALF_SQUARE)
+plt.imshow(np.abs(autocorr_normed), extent=(0, 1, 0, 1))
+plt.xlabel("x")
+plt.ylabel("y")
+if is_paper:
+    plt.xlim([0.25, 0.75])
+    plt.ylim([0.25, 0.75])
+if not is_paper:
+    plt.title("autocorr")
 if save:
     plt.savefig("auc_a")
 
-plt.figure()
-plt.imshow(gradr)
-plt.title("grad_r")
+plt.figure(figsize=FIGSIZE_HALF_SQUARE)
+plt.imshow(gradr, extent=(0, 1, 0, 1))
+plt.xlabel("x")
+plt.ylabel("y")
+if is_paper:
+    plt.xlim([0.25, 0.75])
+    plt.ylim([0.25, 0.75])
+if not is_paper:
+    plt.title("grad_r")
 if save:
     plt.savefig("auc_b")
 
-plt.figure()
-plt.imshow(gradr <= 0)
-plt.title("grad_r <= 0")
+plt.figure(figsize=FIGSIZE_HALF_SQUARE)
+plt.imshow(gradr <= 0, extent=(0, 1, 0, 1))
+plt.xlabel("x")
+plt.ylabel("y")
+if is_paper:
+    plt.xlim([0.25, 0.75])
+    plt.ylim([0.25, 0.75])
+if not is_paper:
+    plt.title("grad_r <= 0")
 if save:
     plt.savefig("auc_c")
 
-plt.figure()
+plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(main_lobe, extent=(0, 1, 0, 1))
-plt.title("Main lobe")
+plt.xlabel("x")
+plt.ylabel("y")
+if is_paper:
+    plt.xlim([0.25, 0.75])
+    plt.ylim([0.25, 0.75])
+if not is_paper:
+    plt.title("Main lobe")
 if save:
     plt.savefig("auc_d")
 
 #%% Conclusion part B
 print(all_reports_neff.T)
 report_neff("from_wavelength", [1 / wavelength ** 2])
+if save:
+    all_reports_neff.to_csv("neff.csv")
 
 all_reports_neff_df = all_reports_neff.T.copy()
 all_reports_neff_df.index.name = "method"
+all_reports_neff_df = all_reports_neff_df.drop("auc")
 vals = all_reports_neff_df["mean"]
 q5 = all_reports_neff_df["q5"]
 q95 = all_reports_neff_df["q95"]
 yerrs = np.stack((vals - q5, q95 - vals), axis=1).T
+yerrs[yerrs == 0] = np.nan
+plt.figure()
 vals.plot.bar(yerr=yerrs, capsize=5)
 plt.gca().set_xticklabels(vals.index, rotation=80)
 plt.ylabel("estimated effective sample size")
@@ -647,14 +740,15 @@ for k, wavelength in enumerate(wavelengths):
 
 df = pd.DataFrame(res)
 df.index.name = "method"
-# df = df[df.index.isin(["fwhm_main_lobe_padded"])]
+df = df[df.index.isin(["area_main_lobe", "fwhm_main_lobe_padded"])]
+df = df.rename(index={"area_main_lobe": "area of main lobe", "fwhm_main_lobe_padded": "FWHM"})
 vals = df.reset_index().pivot(index="wavelength", columns="method", values="mean")
 q5 = df.reset_index().pivot(index="wavelength", columns="method", values="q5")
 q95 = df.reset_index().pivot(index="wavelength", columns="method", values="q95")
 yerrs = np.stack((vals - q5, q95 - vals), axis=1).T
 vals.plot(label=".-", logy=True, logx=True, yerr=yerrs, capsize=5)
-plt.plot(wavelengths, 1 / wavelengths ** 2, "k--", label="neff=1/wavelength^2")
-plt.plot(wavelengths, neff_maximas, "-o", label="maximas")
+plt.plot(wavelengths, 1 / wavelengths ** 2, "k--", label=r"$n=\lambda^{-2}$")
+plt.plot(wavelengths, neff_maximas, "-o", label="maxima method")
 plt.axis("auto")
 plt.ylabel("effective sample size")
 plt.legend()
@@ -697,13 +791,14 @@ print(f"Th. mean if iid: {np.euler_gamma * a + b}")
 
 #%%
 t = np.linspace(3.4, 6, 200)
-plt.figure()
+plt.figure(figsize=(6.4, 2))
 plt.hist(maximas, bins=20, density=True, label="Experimental maxima")
 plt.plot(
     t, stats.gumbel_r.pdf(t, loc=b + a * log_theta, scale=a), label="Gumbel (fitted)"
 )
 plt.plot(t, stats.gumbel_r.pdf(t, loc=b, scale=a), label="Gumbel (iid)")
-plt.title(f"wavelength={wavelength}")
+if not is_paper:
+    plt.title(f"wavelength={wavelength}")
 plt.legend()
 if save:
     plt.savefig("fitted_gumbel")
@@ -725,7 +820,7 @@ log_thetas = np.array(log_thetas)
 thetas = np.exp(log_thetas)
 
 #%%
-plt.figure()
+plt.figure(figsize=(6.4, 2))
 plt.loglog(wavelengths, thetas, ".-")
 plt.ylabel("extremal index")
 plt.xlabel("wavelength")

@@ -46,27 +46,46 @@ pd.set_option("display.max_columns", None)
 plt.rcParams["image.origin"] = "lower"
 if is_paper:
     plt.rcParams["savefig.format"] = "pdf"
-    
+
 if is_paper:
     FIGSIZE_HALF_SQUARE = (3.3, 3.3)
 else:
     FIGSIZE_HALF_SQUARE = None
 #%% Init
 # Measurement area
-x = np.linspace(0, 1, 200, endpoint=False)
-y = np.linspace(0, 1, 200, endpoint=False)
+x = np.linspace(0, 1, 256, endpoint=False)
+y = np.linspace(0, 1, 256, endpoint=False)
 dx = x[1] - x[0]
 dy = y[1] - y[0]
 xx, yy = np.meshgrid(x, y)
-sigma = 1.0
 
 # Speckle generation area (larger to avoid border effect)
-x_ext = np.linspace(-1, 2, 3 * len(x), endpoint=False)
-y_ext = np.linspace(-1, 2, 3 * len(y), endpoint=False)
-# x_ext = (np.arange(512) - 256) * dx
-# y_ext = (np.arange(512) - 256) * dy
+x_ext = np.linspace(-0.5, 1.5, 2 * len(x), endpoint=False)
+y_ext = np.linspace(-0.5, 1.5, 2 * len(y), endpoint=False)
 xx_ext, yy_ext = np.meshgrid(x_ext, y_ext)
 r = np.sqrt((xx_ext - 0.5) ** 2 + (yy_ext - 0.5) ** 2)
+
+extent = (0.0, 1.0, 0.0, 1.0)
+extent_ext = (-0.5, 1.5, -0.5, 1.5)
+extent_centred = (-0.5, 0.5, -0.5, 0.5)
+extent_ext_centred = (-1.0, 1.0, -1.0, 1.0)
+
+# Underlying and apparent sigma.
+# The relationship betweent the two depends on PSF
+sigma = 1.0
+underlying_sigma = sigma / np.sqrt(xx_ext.size)
+
+
+@functools.lru_cache(maxsize=100, typed=False)
+def make_psf(wavelength):
+    psf = np.exp(2j * np.pi / wavelength * r)
+    # psf = np.exp(2j * np.pi / wavelength * r) * np.exp(-(r / (2 * wavelength))**2)
+    psf_fft = np.fft.fft2(psf)
+    return psf, psf_fft
+
+
+def select_centre(arr):
+    return arr[(len(x) // 2) : -(len(x) // 2), (len(y) // 2) : -(len(y) // 2)]
 
 
 def make_field(wavelength=0.1):
@@ -74,18 +93,18 @@ def make_field(wavelength=0.1):
     Generate speckle in Fourier domain
     Valid as long as the pixel size is way smaller than the wavelength
     """
-    psf = np.exp(2j * np.pi / wavelength * r)
-    # psf = np.exp(2j * np.pi / wavelength * r) * np.exp(-(r / (2 * wavelength))**2)
+    psf, psf_fft = make_psf(wavelength)
 
     random_field = (
-        stats.norm(scale=sigma / np.sqrt(xx_ext.size))
+        stats.norm(scale=underlying_sigma)
         .rvs(2 * xx_ext.size)
         .view(np.complex_)
         .reshape(xx_ext.shape)
     )
-    speckle_ext = np.fft.ifft2(np.fft.fft2(psf) * np.fft.fft2(random_field))
-    speckle = speckle_ext[len(x) : 2 * len(x), len(y) : 2 * len(y)]
-
+    speckle_ext = np.fft.fftshift(
+        np.fft.ifft2(psf_fft.conj() * np.fft.fft2(random_field))
+    )
+    speckle = select_centre(speckle_ext)
     return speckle, random_field
 
 
@@ -99,15 +118,13 @@ def make_fields(m, wavelength, seed=123):
     return fields
 
 
-#%% Plot random field, psf, speckle
+#%% Plot random field
 wavelength = 0.1
 np.random.seed(123)
 field, random_field = make_field(wavelength)
 
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
-plt.imshow(
-    np.real(random_field), extent=(-1, 2, -1, 2), cmap="Greys", interpolation="none"
-)
+plt.imshow(np.real(random_field), extent=extent_ext, cmap="Greys", interpolation="none")
 rect = mpl.patches.Rectangle(
     (0, 0), 1, 1, linewidth=1, edgecolor="C1", facecolor="none"
 )
@@ -116,25 +133,35 @@ plt.xlabel("x")
 plt.ylabel("y")
 if save:
     plt.savefig("random_field")
+#%% PSF
+wavelength = 0.1
+psf, psf_fft = make_psf(wavelength)
 
-psf = np.exp(2j * np.pi / wavelength * r)
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
-plt.imshow(np.real(psf), extent=(-1, 2, -1, 2), cmap="Greys", interpolation="none")
-rect = mpl.patches.Rectangle(
-    (0, 0), 1, 1, linewidth=1, edgecolor="C1", facecolor="none"
-)
-plt.gca().add_patch(rect)
+plt.imshow(np.real(psf), extent=extent_ext_centred, interpolation="none")
 plt.xlabel("x")
 plt.ylabel("y")
 if save:
     plt.savefig("psf")
+
+psf_autocorr = np.fft.fftshift(np.fft.ifft2(psf_fft * psf_fft.conj()))
+# psf_autocorr = psf_autocorr[(len(x) // 2): -(len(x) // 2), (len(y) // 2): -(len(y) // 2)]
+psf_autocorr_normed = np.abs(psf_autocorr)
+psf_autocorr_normed /= np.max(psf_autocorr_normed)
+plt.figure()
+plt.imshow(psf_autocorr_normed, extent=extent_ext_centred)
+plt.clim(0, 1)
+plt.xlabel("x")
+plt.ylabel("y")
+if save:
+    plt.savefig("psf_autocorr")
 
 #%% Plot field
 for wavelength in [0.01, 0.05, 0.1, 0.2, 0.5]:
     np.random.seed(123)
     field, _ = make_field(wavelength)
     plt.figure(figsize=FIGSIZE_HALF_SQUARE)
-    plt.imshow(np.abs(field), extent=(0, 1, 0, 1))
+    plt.imshow(np.abs(field), extent=extent)
     plt.axis("square")
     plt.xlabel("x")
     plt.ylabel("y")
@@ -273,7 +300,7 @@ vals = all_reports_sigma_df["mean"]
 q5 = all_reports_sigma_df["q5"]
 q95 = all_reports_sigma_df["q95"]
 yerrs = np.stack((vals - q5, q95 - vals), axis=1).T
-plt.figure(figsize=(6.4, 2.))
+plt.figure(figsize=(6.4, 2.0))
 vals.plot.bar(yerr=yerrs, capsize=5)
 plt.gca().set_xticklabels(vals.index, rotation=45)
 plt.ylabel("estimated sigma")
@@ -388,48 +415,48 @@ print(report_neff("fwhm_main_lobe_padded", estimates))
 
 #%% Plot FWHM
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
-plt.imshow(np.abs(autocorr_normed), extent=(0, 1, 0, 1))
+plt.imshow(np.abs(autocorr_normed), extent=extent_centred)
 plt.xlabel("x")
 plt.ylabel("y")
 if is_paper:
-    plt.xlim([0.25, 0.75])
-    plt.ylim([0.25, 0.75])
+    plt.xlim([-0.25, 0.25])
+    plt.ylim([-0.25, 0.25])
 if not is_paper:
     plt.title("autocorrelation")
 if save:
     plt.savefig("fwhm_a")
 
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
-plt.imshow(np.abs(autocorr_normed) > 1 / np.e, extent=(0, 1, 0, 1))
+plt.imshow(np.abs(autocorr_normed) > 1 / np.e, extent=extent_centred)
 plt.xlabel("x")
 plt.ylabel("y")
 if is_paper:
-    plt.xlim([0.25, 0.75])
-    plt.ylim([0.25, 0.75])
+    plt.xlim([-0.25, 0.25])
+    plt.ylim([-0.25, 0.25])
 if not is_paper:
     plt.title("autocorrelation thresholded with 1/e")
 if save:
     plt.savefig("fwhm_b")
 
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
-plt.imshow(labels, extent=(0, 1, 0, 1))
+plt.imshow(labels, extent=extent_centred)
 plt.xlabel("x")
 plt.ylabel("y")
 if is_paper:
-    plt.xlim([0.25, 0.75])
-    plt.ylim([0.25, 0.75])
+    plt.xlim([-0.25, 0.25])
+    plt.ylim([-0.25, 0.25])
 if not is_paper:
     plt.title("clusters in thresholded autocorrelation")
 if save:
     plt.savefig("fwhm_c")
 
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
-plt.imshow(labels == centre_label, extent=(0, 1, 0, 1))
+plt.imshow(labels == centre_label, extent=extent_centred)
 plt.xlabel("x")
 plt.ylabel("y")
 if is_paper:
-    plt.xlim([0.25, 0.75])
-    plt.ylim([0.25, 0.75])
+    plt.xlim([-0.25, 0.25])
+    plt.ylim([-0.25, 0.25])
 if not is_paper:
     plt.title("main lobe for FWHM")
 if save:
@@ -517,14 +544,14 @@ def neff_maxima_method(fields):
 
 fields = make_fields(m, wavelength)
 neff, q5, q95, maximas = neff_maxima_method(fields)
-
+#%%
 # Plot
 nvect = np.arange(1, 10000, 10)
 log_likelihood = maxrayleigh_logpdf(
     maximas[np.newaxis], nvect[..., np.newaxis], sigma
 ).sum(axis=-1)
 plt.figure()
-plt.plot(nvect, np.exp(log_likelihood))
+plt.plot(nvect, np.exp(log_likelihood - np.max(log_likelihood)))
 plt.xlabel("effective sample size")
 if not is_paper:
     plt.title(f"maximum likelihood={neff:.0f}")
@@ -603,48 +630,48 @@ print(report_neff("area_main_lobe", estimates))
 
 #%% Plot area under main lobe
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
-plt.imshow(np.abs(autocorr_normed), extent=(0, 1, 0, 1))
+plt.imshow(np.abs(autocorr_normed), extent=extent_centred)
 plt.xlabel("x")
 plt.ylabel("y")
 if is_paper:
-    plt.xlim([0.25, 0.75])
-    plt.ylim([0.25, 0.75])
+    plt.xlim([-0.25, 0.25])
+    plt.ylim([-0.25, 0.25])
 if not is_paper:
     plt.title("autocorr")
 if save:
     plt.savefig("auc_a")
 
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
-plt.imshow(gradr, extent=(0, 1, 0, 1))
+plt.imshow(gradr, extent=extent_centred)
 plt.xlabel("x")
 plt.ylabel("y")
 if is_paper:
-    plt.xlim([0.25, 0.75])
-    plt.ylim([0.25, 0.75])
+    plt.xlim([-0.25, 0.25])
+    plt.ylim([-0.25, 0.25])
 if not is_paper:
     plt.title("grad_r")
 if save:
     plt.savefig("auc_b")
 
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
-plt.imshow(gradr <= 0, extent=(0, 1, 0, 1))
+plt.imshow(gradr <= 0, extent=extent_centred)
 plt.xlabel("x")
 plt.ylabel("y")
 if is_paper:
-    plt.xlim([0.25, 0.75])
-    plt.ylim([0.25, 0.75])
+    plt.xlim([-0.25, 0.25])
+    plt.ylim([-0.25, 0.25])
 if not is_paper:
     plt.title("grad_r <= 0")
 if save:
     plt.savefig("auc_c")
 
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
-plt.imshow(main_lobe, extent=(0, 1, 0, 1))
+plt.imshow(main_lobe, extent=extent_centred)
 plt.xlabel("x")
 plt.ylabel("y")
 if is_paper:
-    plt.xlim([0.25, 0.75])
-    plt.ylim([0.25, 0.75])
+    plt.xlim([-0.25, 0.25])
+    plt.ylim([-0.25, 0.25])
 if not is_paper:
     plt.title("Main lobe")
 if save:
@@ -741,7 +768,9 @@ for k, wavelength in enumerate(wavelengths):
 df = pd.DataFrame(res)
 df.index.name = "method"
 df = df[df.index.isin(["area_main_lobe", "fwhm_main_lobe_padded"])]
-df = df.rename(index={"area_main_lobe": "area of main lobe", "fwhm_main_lobe_padded": "FWHM"})
+df = df.rename(
+    index={"area_main_lobe": "area of main lobe", "fwhm_main_lobe_padded": "FWHM"}
+)
 vals = df.reset_index().pivot(index="wavelength", columns="method", values="mean")
 q5 = df.reset_index().pivot(index="wavelength", columns="method", values="q5")
 q95 = df.reset_index().pivot(index="wavelength", columns="method", values="q95")

@@ -23,7 +23,8 @@ Sources of errors:
     - Wavelength too small: discretisation becomes too rough
     - Wavelength too large: measured area becomes too small to be
       statistically representative
-
+      
+If changing the PSF: adjust underlying_sigma, true_sigma, psf
 
 """
 import argparse
@@ -70,22 +71,32 @@ extent_ext = (-0.5, 1.5, -0.5, 1.5)
 extent_centred = (-0.5, 0.5, -0.5, 0.5)
 extent_ext_centred = (-1.0, 1.0, -1.0, 1.0)
 
-# Underlying and apparent sigma.
-# The relationship betweent the two depends on PSF
-sigma = 1.0
-underlying_sigma = sigma / np.sqrt(xx_ext.size)
+underlying_sigma = 1.0 / np.sqrt(xx_ext.size)
 
 
 @functools.lru_cache(maxsize=100, typed=False)
 def make_psf(wavelength):
     psf = np.exp(2j * np.pi / wavelength * r)
-    # psf = np.exp(2j * np.pi / wavelength * r) * np.exp(-(r / (2 * wavelength))**2)
+    # psf = np.exp(2j * np.pi / wavelength * r) * np.exp(-(r / wavelength) ** 2)
     psf_fft = np.fft.fft2(psf)
     return psf, psf_fft
 
 
 def select_centre(arr):
     return arr[(len(x) // 2) : -(len(x) // 2), (len(y) // 2) : -(len(y) // 2)]
+
+
+@functools.lru_cache(maxsize=100, typed=False)
+def true_sigma(wavelength):
+    """
+    True sigma. Must be consistent with PSF!
+    """
+    # # empirical, Rayleigh ML
+    # fields = make_fields(m, wavelength)
+    # sigma_hat = np.sqrt(np.mean(np.abs(fields) ** 2)) / np.sqrt(2)
+    # return sigma_hat
+
+    return 1.0
 
 
 def make_field(wavelength=0.1):
@@ -281,7 +292,7 @@ print(report_sigma("rayleigh_order", estimates))
 #%% Rayleigh ML if we were independant
 estimates = np.zeros(m)
 for k in range(m):
-    field = stats.rayleigh(scale=sigma).rvs(xx.size)
+    field = stats.rayleigh(scale=true_sigma(wavelength)).rvs(xx.size)
     field = make_subfield(field)
     estimates[k] = np.sqrt(np.mean(np.abs(field) ** 2)) / np.sqrt(2)
 print(report_sigma("rayleigh_ml_if_iid", estimates))
@@ -309,6 +320,7 @@ if save:
     plt.savefig("sigma_estimate")
 
 #%% Plot Normal dist
+sigma = true_sigma(wavelength)
 field, _ = make_field(wavelength)
 t = np.linspace(-3 * sigma, +3 * sigma, 100)
 plt.figure()
@@ -333,6 +345,7 @@ plt.legend()
 all_reports_neff = pd.DataFrame()
 wavelength = 0.1
 m = 200
+sigma = true_sigma(wavelength)
 
 
 def report_neff(method_name, estimates, save=True):
@@ -513,7 +526,7 @@ def test_maxrayleigh_logpdf():
     m = 2000
     np.random.seed(123)
     samples = [np.max(stats.rayleigh.rvs(size=neff, scale=sigma)) for i in range(m)]
-    t = np.linspace(1, 10, 100)
+    t = np.linspace(0.01, 10, 100)
     plt.figure()
     plt.hist(samples, bins=30, density=True)
     plt.plot(t, np.exp(maxrayleigh_logpdf(t, neff, sigma)))
@@ -523,7 +536,7 @@ def test_maxrayleigh_logpdf():
 test_maxrayleigh_logpdf()
 
 #%% From dist of maxima
-def neff_maxima_method(fields):
+def neff_maxima_method(fields, sigma):
     m = len(fields)
     maximas = np.zeros(m)
     for k, field in enumerate(fields):
@@ -533,7 +546,10 @@ def neff_maxima_method(fields):
     # Calculate max likelihood
     likelihood_func = lambda n: -maxrayleigh_logpdf(maximas, n, sigma).sum()
     res = optimize.minimize_scalar(
-        likelihood_func, bounds=(1, xx.size), method="bounded"
+        likelihood_func,
+        bounds=(1, xx_ext.size),
+        method="bounded",
+        options={"xatol": 1e-03},
     )
     assert res.success
     neff = res.x
@@ -543,12 +559,12 @@ def neff_maxima_method(fields):
 
 
 fields = make_fields(m, wavelength)
-neff, q5, q95, maximas = neff_maxima_method(fields)
-#%%
+neff, q5, q95, maximas = neff_maxima_method(fields, true_sigma(wavelength))
+
 # Plot
 nvect = np.arange(1, 10000, 10)
 log_likelihood = maxrayleigh_logpdf(
-    maximas[np.newaxis], nvect[..., np.newaxis], sigma
+    maximas[np.newaxis], nvect[..., np.newaxis], true_sigma(wavelength)
 ).sum(axis=-1)
 plt.figure()
 plt.plot(nvect, np.exp(log_likelihood - np.max(log_likelihood)))
@@ -760,7 +776,7 @@ for wavelength in tqdm.tqdm(wavelengths):
 neff_maximas = np.zeros(len(wavelengths))
 for k, wavelength in enumerate(wavelengths):
     fields = make_fields(m, wavelength)
-    neff, _, _, _ = neff_maxima_method(fields)
+    neff, _, _, _ = neff_maxima_method(fields, true_sigma(wavelength))
     neff_maximas[k] = neff
 
 #%% Plot effective sample size vs wavelength
@@ -797,8 +813,8 @@ for k, field in enumerate(fields):
     maximas[k] = np.max(np.abs(field))
     # maximas[k] = np.max(stats.rayleigh(scale=sigma).rvs(xx.size))  # debug
 
-a = sigma / np.sqrt(2 * np.log(field.size))
-b = sigma * np.sqrt(2 * np.log(field.size))
+a = true_sigma(wavelength) / np.sqrt(2 * np.log(field.size))
+b = true_sigma(wavelength) * np.sqrt(2 * np.log(field.size))
 
 # debug
 # maximas = stats.gumbel_r(loc=b, scale=a).rvs(m)
@@ -820,6 +836,7 @@ print(f"Th. mean if iid: {np.euler_gamma * a + b}")
 
 #%%
 t = np.linspace(3.4, 6, 200)
+# t = np.linspace(maximas.min(), maximas.max(), 200)
 plt.figure(figsize=(6.4, 2))
 plt.hist(maximas, bins=20, density=True, label="Experimental maxima")
 plt.plot(
@@ -841,8 +858,8 @@ for wavelength in tqdm.tqdm(wavelengths):
     for k, field in enumerate(fields):
         field = make_subfield(field)
         maximas[k] = np.max(np.abs(field))
-    a = sigma / np.sqrt(2 * np.log(field.size))
-    b = sigma * np.sqrt(2 * np.log(field.size))
+    a = true_sigma(wavelength) / np.sqrt(2 * np.log(field.size))
+    b = true_sigma(wavelength) * np.sqrt(2 * np.log(field.size))
     log_theta = -np.log(np.mean(np.exp(-(maximas - b) / a)))
     log_thetas.append(log_theta)
 log_thetas = np.array(log_thetas)

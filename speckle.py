@@ -228,18 +228,7 @@ def make_subfield(field):
     return field
 
 
-#%% From real part of pixels
-estimates = np.zeros(m)
-fields = make_fields(m, wavelength)
-for k, field in enumerate(fields):
-    field = make_subfield(field)
-    estimates[k] = np.std(field.real)
-
-plt.figure()
-plt.hist(estimates, density=True, bins=20)
-print(report_sigma("std_real", estimates))
-
-#%% From real part of pixels - bis
+#%% From real part of pixels - MLE of variance of univariate Gaussian for known mean
 estimates = np.zeros(m)
 fields = make_fields(m, wavelength)
 for k, field in enumerate(fields):
@@ -248,7 +237,7 @@ for k, field in enumerate(fields):
 
 plt.figure()
 plt.hist(estimates, density=True, bins=20)
-print(report_sigma("std_real2", estimates))
+print(report_sigma("std_real", estimates))
 
 #%% From RMS (Rayleigh max lihelihood)
 estimates = np.zeros(m)
@@ -260,25 +249,6 @@ for k, field in enumerate(fields):
 plt.figure()
 plt.hist(estimates, density=True, bins=20)
 print(report_sigma("rayleigh_ml", estimates))
-
-#%% From RMS (Rayleigh max lihelihood) + bootstrap
-estimates = np.zeros(m)
-fields = make_fields(m, wavelength)
-np.random.seed(123)
-for k, field in enumerate(tqdm.tqdm(fields)):
-    field = make_subfield(field)
-    estimate_tmp = []
-    _field = field.ravel()
-    for _ in range(10):
-        field_bootstraped = np.random.choice(_field, size=len(_field), replace=True)
-        estimate_tmp.append(
-            np.sqrt(np.mean(np.abs(field_bootstraped) ** 2)) / np.sqrt(2)
-        )
-    estimates[k] = np.mean(estimate_tmp)
-
-plt.figure()
-plt.hist(estimates, density=True, bins=20)
-print(report_sigma("rayleigh_ml_boot", estimates))
 
 #%% From mean of Rayleigh
 # theoretically suboptimal but why not
@@ -306,7 +276,6 @@ for k, field in enumerate(fields):
 plt.figure()
 plt.hist(estimates, density=True, bins=20)
 print(report_sigma("rayleigh_order", estimates))
-
 
 #%% Rayleigh ML if we were independant
 estimates = np.zeros(m)

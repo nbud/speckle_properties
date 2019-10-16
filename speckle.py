@@ -382,8 +382,8 @@ def report_neff(method_name, estimates, save=True):
     return s
 
 
-#%% From FWHM (cutoff 1/e) (all lobes)
-def aca_fwhm(field):
+#%% From width (cutoff 1/e) (all lobes)
+def aca_width(field):
     Z = np.fft.fft2(field)
     _autocorr = np.fft.ifft2(Z * np.conj(Z))
     autocorr = np.fft.fftshift(_autocorr)
@@ -396,16 +396,16 @@ estimates = np.zeros(m)
 fields = make_fields(m, wavelength)
 for k, field in enumerate(tqdm.tqdm(fields)):
     field = make_subfield(field)
-    aca, autocorr_normed = aca_fwhm(field)
+    aca, autocorr_normed = aca_width(field)
     estimates[k] = 1 / aca
 
 plt.figure()
 plt.hist(estimates, density=True, bins=30)
 
-print(report_neff("fwhm", estimates))
+print(report_neff("width", estimates))
 
-#%% From FWHM (cutoff 1/e) (main lobe)
-def aca_fwhm_main_lobe(field, p=1):
+#%% From width (cutoff 1/e) (main lobe)
+def aca_width_main_lobe(field, p=1):
     Z = np.fft.fft2(field, (p * field.shape[0], p * field.shape[1]))
     _autocorr = np.fft.ifft2(Z * np.conj(Z))
     autocorr = np.fft.fftshift(_autocorr)
@@ -420,16 +420,16 @@ estimates = np.zeros(m)
 fields = make_fields(m, wavelength)
 for k, field in enumerate(tqdm.tqdm(fields)):
     field = make_subfield(field)
-    aca, autocorr_normed, labels, centre_label = aca_fwhm_main_lobe(field)
+    aca, autocorr_normed, labels, centre_label = aca_width_main_lobe(field)
     estimates[k] = 1 / aca
 
 plt.figure()
 plt.hist(estimates, density=True, bins=30)
 
-print(report_neff("fwhm_main_lobe", estimates))
+print(report_neff("width_main_lobe", estimates))
 
 
-#%% From FWHM (cutoff 1/e) (main lobe and padded)
+#%% From width (cutoff 1/e) (main lobe and padded)
 # padding factor
 p = 2
 
@@ -437,15 +437,15 @@ estimates = np.zeros(m)
 fields = make_fields(m, wavelength)
 for k, field in enumerate(tqdm.tqdm(fields)):
     field = make_subfield(field)
-    aca, autocorr_normed, labels, centre_label = aca_fwhm_main_lobe(field, p)
+    aca, autocorr_normed, labels, centre_label = aca_width_main_lobe(field, p)
     estimates[k] = 1 / aca
 
 plt.figure()
 plt.hist(estimates, density=True, bins=30)
 
-print(report_neff("fwhm_main_lobe_padded", estimates))
+print(report_neff("width_main_lobe_padded", estimates))
 
-#%% Plot FWHM
+#%% Plot width
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(np.abs(autocorr_normed), extent=extent_centred)
 plt.xlabel("x")
@@ -456,7 +456,7 @@ if is_paper:
 if not is_paper:
     plt.title("autocorrelation")
 if save:
-    plt.savefig("fwhm_a")
+    plt.savefig("width_a")
 
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(np.abs(autocorr_normed) > 1 / np.e, extent=extent_centred)
@@ -468,7 +468,7 @@ if is_paper:
 if not is_paper:
     plt.title("autocorrelation thresholded with 1/e")
 if save:
-    plt.savefig("fwhm_b")
+    plt.savefig("width_b")
 
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(labels, extent=extent_centred)
@@ -480,7 +480,7 @@ if is_paper:
 if not is_paper:
     plt.title("clusters in thresholded autocorrelation")
 if save:
-    plt.savefig("fwhm_c")
+    plt.savefig("width_c")
 
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(labels == centre_label, extent=extent_centred)
@@ -490,9 +490,9 @@ if is_paper:
     plt.xlim([-0.25, 0.25])
     plt.ylim([-0.25, 0.25])
 if not is_paper:
-    plt.title("main lobe for FWHM")
+    plt.title("main lobe for width")
 if save:
-    plt.savefig("fwhm_d")
+    plt.savefig("width_d")
 
 
 #%% From variance of Rayleigh sigma ML estimator
@@ -779,22 +779,22 @@ p = 2
 
 res = []
 for wavelength in tqdm.tqdm(wavelengths):
-    estimates_fwhm = np.zeros(m)
-    estimates_fwhm_main_lobe = np.zeros(m)
-    estimates_fwhm_main_lobe_padded = np.zeros(m)
+    estimates_width = np.zeros(m)
+    estimates_width_main_lobe = np.zeros(m)
+    estimates_width_main_lobe_padded = np.zeros(m)
     estimates_auc = np.zeros(m)
     estimates_area_main_lobe = np.zeros(m)
     fields = make_fields(m, wavelength)
     for k, field in enumerate(fields):
         field = make_subfield(field)
-        aca, _ = aca_fwhm(field)
-        estimates_fwhm[k] = 1 / aca
+        aca, _ = aca_width(field)
+        estimates_width[k] = 1 / aca
 
-        aca, _, _, _ = aca_fwhm_main_lobe(field)
-        estimates_fwhm_main_lobe[k] = 1 / aca
+        aca, _, _, _ = aca_width_main_lobe(field)
+        estimates_width_main_lobe[k] = 1 / aca
 
-        aca, _, _, _ = aca_fwhm_main_lobe(field, p)
-        estimates_fwhm_main_lobe_padded[k] = 1 / aca
+        aca, _, _, _ = aca_width_main_lobe(field, p)
+        estimates_width_main_lobe_padded[k] = 1 / aca
 
         aca = aca_auc(field, p)
         estimates_auc[k] = 1 / aca
@@ -802,16 +802,16 @@ for wavelength in tqdm.tqdm(wavelengths):
         aca, _, _, _ = aca_area_main_lobe(field, p)
         estimates_area_main_lobe[k] = 1 / aca
 
-    report = report_neff("fwhm", estimates_fwhm, save=False)
+    report = report_neff("width", estimates_width, save=False)
     report["wavelength"] = wavelength
     res.append(report)
 
-    report = report_neff("fwhm_main_lobe", estimates_fwhm_main_lobe, save=False)
+    report = report_neff("width_main_lobe", estimates_width_main_lobe, save=False)
     report["wavelength"] = wavelength
     res.append(report)
 
     report = report_neff(
-        "fwhm_main_lobe_padded", estimates_fwhm_main_lobe_padded, save=False
+        "width_main_lobe_padded", estimates_width_main_lobe_padded, save=False
     )
     report["wavelength"] = wavelength
     res.append(report)
@@ -845,9 +845,12 @@ for k, wavelength in enumerate(wavelengths):
 
 df = pd.DataFrame(res)
 df.index.name = "method"
-df = df[df.index.isin(["area_main_lobe", "fwhm_main_lobe_padded"])]
+df = df[df.index.isin(["area_main_lobe", "width_main_lobe_padded"])]
 df = df.rename(
-    index={"area_main_lobe": "area of main lobe", "fwhm_main_lobe_padded": "FWHM"}
+    index={
+        "area_main_lobe": "area of main lobe",
+        "width_main_lobe_padded": "width of main lobe",
+    }
 )
 vals = df.reset_index().pivot(index="wavelength", columns="method", values="mean")
 q5 = df.reset_index().pivot(index="wavelength", columns="method", values="q5")

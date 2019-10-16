@@ -129,6 +129,25 @@ def make_fields(m, wavelength, seed=123):
     return fields
 
 
+def make_ecdf(samples):
+    """ Empiral cdf"""
+    x = np.sort(samples)
+    n = x.size
+    cdf = np.arange(1, n + 1) / n
+    return x, cdf
+
+
+def pp_plot(samples, cdf_func):
+    ecdf_x, ecdf = make_ecdf(samples)
+    plt.figure(figsize=FIGSIZE_HALF_SQUARE)
+    plt.plot(cdf_func(ecdf_x), ecdf, ".")
+    plt.plot([0, 1], [0, 1], "k--")
+    plt.xlabel("theoretical cumulative distribution")
+    plt.ylabel("empirical cumulative distribution")
+    if not is_paper:
+        plt.title("P-P plot")
+
+
 #%% Plot random field
 wavelength = 0.1
 np.random.seed(123)
@@ -508,6 +527,13 @@ def rayleigh_logcdf(x):
     return np.log(1 - np.exp(-(x * x) / 2))
 
 
+def maxrayleigh_logcdf(x, n, sigma):
+    """
+    cdf of max of n iid Rayleigh distribution
+    """
+    return n * rayleigh_logcdf(x)
+
+
 def maxrayleigh_logpdf(x, n, sigma):
     """
     pdf of max of n iid Rayleigh distribution
@@ -558,6 +584,19 @@ def neff_maxima_method(fields, sigma):
     return neff, q5, q95, maximas
 
 
+def test_neff_maxima_method():
+    # check max likelihood estimation with mock data
+    m = 200
+    true_neff = 50
+    sigma = 2.0
+    fields = stats.rayleigh.rvs(size=(m, true_neff), scale=sigma)
+    neff, q5, q95, maximas = neff_maxima_method(fields, sigma)
+    print(f"[TEST] true neff: {true_neff}")
+    print(f"[TEST] estimated neff: {neff}")
+
+
+test_neff_maxima_method()
+
 fields = make_fields(m, wavelength)
 neff, q5, q95, maximas = neff_maxima_method(fields, true_sigma(wavelength))
 
@@ -577,6 +616,19 @@ if save:
 # TODO: calculate HPD
 print(report_neff("maxima", [neff]))
 
+
+fitted_rayleigh_cdf = lambda t: np.exp(
+    maxrayleigh_logcdf(t, neff, true_sigma(wavelength))
+)
+ecdf_x, ecdf = make_ecdf(maximas)
+plt.figure()
+plt.step(ecdf_x, ecdf)
+t = np.linspace(2, 6)
+plt.plot(t, fitted_rayleigh_cdf(t))
+plt.title("Fit results for MaxRayleigh - cdf")
+
+pp_plot(maximas, fitted_rayleigh_cdf)
+plt.title("Fit results for MaxRayleigh - PP-plot")
 
 #%% From area under curve (Goodman // Wagner 1983 eq 31) (unpadded)
 def aca_auc(field, p=1):
@@ -776,8 +828,18 @@ for wavelength in tqdm.tqdm(wavelengths):
 neff_maximas = np.zeros(len(wavelengths))
 for k, wavelength in enumerate(wavelengths):
     fields = make_fields(m, wavelength)
-    neff, _, _, _ = neff_maxima_method(fields, true_sigma(wavelength))
+    neff, _, _, maximas = neff_maxima_method(fields, true_sigma(wavelength))
     neff_maximas[k] = neff
+
+    fitted_rayleigh_cdf = lambda t: np.exp(
+        maxrayleigh_logcdf(t, neff, true_sigma(wavelength))
+    )
+    pp_plot(maximas, fitted_rayleigh_cdf)
+    if not is_paper:
+        plt.title(f"P-P plot, fitted MaxRayleigh, wavelength={wavelength}")
+    if save:
+        wavelength_str = str(wavelength).replace(".", "_")
+        plt.savefig(f"pp_plot_fitted_rayleigh_{wavelength_str}")
 
 #%% Plot effective sample size vs wavelength
 
@@ -834,20 +896,20 @@ print(f"Experimental mean: {np.mean(maximas)}")
 print(f"Th. mean inc. theta: {a * (log_theta + np.euler_gamma) + b}")
 print(f"Th. mean if iid: {np.euler_gamma * a + b}")
 
-#%%
+fitted_gumbel = stats.gumbel_r(loc=b + a * log_theta, scale=a)
 t = np.linspace(3.4, 6, 200)
 # t = np.linspace(maximas.min(), maximas.max(), 200)
 plt.figure(figsize=(6.4, 2))
 plt.hist(maximas, bins=20, density=True, label="Experimental maxima")
-plt.plot(
-    t, stats.gumbel_r.pdf(t, loc=b + a * log_theta, scale=a), label="Gumbel (fitted)"
-)
+plt.plot(t, fitted_gumbel.pdf(t), label="Gumbel (fitted)")
 plt.plot(t, stats.gumbel_r.pdf(t, loc=b, scale=a), label="Gumbel (iid)")
 if not is_paper:
     plt.title(f"wavelength={wavelength}")
 plt.legend()
 if save:
     plt.savefig("fitted_gumbel")
+
+# pp_plot(maximas, fitted_gumbel.cdf)
 
 #%%
 wavelengths = np.array([0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5])
@@ -862,6 +924,14 @@ for wavelength in tqdm.tqdm(wavelengths):
     b = true_sigma(wavelength) * np.sqrt(2 * np.log(field.size))
     log_theta = -np.log(np.mean(np.exp(-(maximas - b) / a)))
     log_thetas.append(log_theta)
+
+    fitted_gumbel = stats.gumbel_r(loc=b + a * log_theta, scale=a)
+    pp_plot(maximas, fitted_gumbel.cdf)
+    if not is_paper:
+        plt.title(f"P-P plot, fitted Gumbel, wavelength={wavelength}")
+    if save:
+        wavelength_str = str(wavelength).replace(".", "_")
+        plt.savefig(f"pp_plot_fitted_gumbel_{wavelength_str}")
 log_thetas = np.array(log_thetas)
 thetas = np.exp(log_thetas)
 

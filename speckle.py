@@ -915,3 +915,28 @@ plt.ylabel("extremal index")
 plt.xlabel("wavelength")
 if save:
     plt.savefig("extremal_index")
+
+
+#%% == PART E: further tests
+
+#%% Check "RMS SNR ratio"
+# Goodman 1975 eq 1.113
+# Smith 1983 eq 18
+# Works better with the "narrow" PSF
+wavelengths = np.array([0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5])
+m = 200
+
+snr_rmses = np.zeros(len(wavelengths))
+for i, wavelength in enumerate(wavelengths):
+    estimates = np.zeros(m)
+    fields = make_fields(m, wavelength)
+    for k, field in enumerate(fields):
+        estimates[k] = np.mean(np.abs(field))
+    snr_rmses[i] = np.mean(estimates) / np.std(estimates)
+
+plt.figure()
+plt.loglog(wavelengths, snr_rmses, label="exp")
+plt.loglog(wavelengths, 1 / wavelengths, label="1/wavelength")
+plt.xlabel("wavelength")
+plt.title("RMS signal-to-noise ratio")
+plt.legend()

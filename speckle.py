@@ -278,6 +278,7 @@ plt.hist(estimates, density=True, bins=20)
 print(report_sigma("rayleigh_order", estimates))
 
 #%% Rayleigh ML if we were independant
+np.random.seed(123)
 estimates = np.zeros(m)
 for k in range(m):
     field = stats.rayleigh(scale=true_sigma(wavelength)).rvs(xx.size)

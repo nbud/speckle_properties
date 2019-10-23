@@ -169,7 +169,7 @@ rect = mpl.patches.Rectangle(
 )
 plt.gca().add_patch(rect)
 plt.xlabel("x")
-plt.ylabel("y")
+plt.ylabel("z")
 if save:
     plt.savefig("random_field")
 #%% PSF
@@ -179,7 +179,7 @@ psf, psf_fft = make_psf(wavelength)
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(np.real(psf), extent=extent_ext_centred, interpolation="none")
 plt.xlabel("x")
-plt.ylabel("y")
+plt.ylabel("z")
 if save:
     plt.savefig("psf")
 
@@ -191,7 +191,7 @@ plt.figure()
 plt.imshow(psf_autocorr_normed, extent=extent_ext_centred)
 plt.clim(0, 1)
 plt.xlabel("x")
-plt.ylabel("y")
+plt.ylabel("z")
 if save:
     plt.savefig("psf_autocorr")
 
@@ -203,7 +203,7 @@ for wavelength in [0.01, 0.05, 0.1, 0.2, 0.5]:
     plt.imshow(np.abs(field), extent=extent)
     plt.axis("square")
     plt.xlabel("x")
-    plt.ylabel("y")
+    plt.ylabel("z")
     if not is_paper:
         plt.title(f"wavelength={wavelength}")
     wavelength_str = str(wavelength).replace(".", "_")
@@ -421,7 +421,7 @@ print(report_neff("width_main_lobe_padded", estimates))
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(np.abs(autocorr_normed), extent=extent_centred)
 plt.xlabel("x")
-plt.ylabel("y")
+plt.ylabel("z")
 if is_paper:
     plt.xlim([-0.25, 0.25])
     plt.ylim([-0.25, 0.25])
@@ -433,7 +433,7 @@ if save:
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(np.abs(autocorr_normed) > 1 / np.e, extent=extent_centred)
 plt.xlabel("x")
-plt.ylabel("y")
+plt.ylabel("z")
 if is_paper:
     plt.xlim([-0.25, 0.25])
     plt.ylim([-0.25, 0.25])
@@ -445,7 +445,7 @@ if save:
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(labels, extent=extent_centred)
 plt.xlabel("x")
-plt.ylabel("y")
+plt.ylabel("z")
 if is_paper:
     plt.xlim([-0.25, 0.25])
     plt.ylim([-0.25, 0.25])
@@ -457,7 +457,7 @@ if save:
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(labels == centre_label, extent=extent_centred)
 plt.xlabel("x")
-plt.ylabel("y")
+plt.ylabel("z")
 if is_paper:
     plt.xlim([-0.25, 0.25])
     plt.ylim([-0.25, 0.25])
@@ -672,7 +672,7 @@ print(report_neff("area_main_lobe", estimates))
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(np.abs(autocorr_normed), extent=extent_centred)
 plt.xlabel("x")
-plt.ylabel("y")
+plt.ylabel("z")
 if is_paper:
     plt.xlim([-0.25, 0.25])
     plt.ylim([-0.25, 0.25])
@@ -684,7 +684,7 @@ if save:
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(gradr, extent=extent_centred)
 plt.xlabel("x")
-plt.ylabel("y")
+plt.ylabel("z")
 if is_paper:
     plt.xlim([-0.25, 0.25])
     plt.ylim([-0.25, 0.25])
@@ -696,7 +696,7 @@ if save:
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(gradr <= 0, extent=extent_centred)
 plt.xlabel("x")
-plt.ylabel("y")
+plt.ylabel("z")
 if is_paper:
     plt.xlim([-0.25, 0.25])
     plt.ylim([-0.25, 0.25])
@@ -708,7 +708,7 @@ if save:
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(main_lobe, extent=extent_centred)
 plt.xlabel("x")
-plt.ylabel("y")
+plt.ylabel("z")
 if is_paper:
     plt.xlim([-0.25, 0.25])
     plt.ylim([-0.25, 0.25])

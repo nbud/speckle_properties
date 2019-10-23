@@ -137,15 +137,24 @@ def make_ecdf(samples):
     return x, cdf
 
 
-def pp_plot(samples, cdf_func):
+def pp_plot(samples, cdf_func, ax=None, label=None):
+    if ax is None:
+        fig, ax = plt.subplots(figsize=FIGSIZE_HALF_SQUARE)
     ecdf_x, ecdf = make_ecdf(samples)
-    plt.figure(figsize=FIGSIZE_HALF_SQUARE)
-    plt.plot(cdf_func(ecdf_x), ecdf, ".")
-    plt.plot([0, 1], [0, 1], "k--")
-    plt.xlabel("theoretical cumulative distribution")
-    plt.ylabel("empirical cumulative distribution")
+    ax.plot(cdf_func(ecdf_x), ecdf, ".", label=label)
+    ax.plot([0, 1], [0, 1], "k--")
+    ax.set_xlabel("theoretical cumulative distribution")
+    ax.set_ylabel("empirical cumulative distribution")
     if not is_paper:
-        plt.title("P-P plot")
+        ax.set_title("P-P plot")
+    return ax
+
+
+def make_subfield(field):
+    """
+    the one place to downsample, use a smaller field, etc
+    """
+    return field
 
 
 #%% Plot random field
@@ -219,13 +228,6 @@ def report_sigma(method_name, estimates):
     s = pd.Series(out, name=method_name)
     all_reports_sigma[method_name] = s
     return s
-
-
-def make_subfield(field):
-    """
-    the one place to downsample, use a smaller field, etc
-    """
-    return field
 
 
 #%% From real part of pixels - MLE of variance of univariate Gaussian for known mean
@@ -531,8 +533,8 @@ def test_maxrayleigh_logpdf():
 
 test_maxrayleigh_logpdf()
 
-#%% From dist of maxima
-def neff_maxima_method(fields, sigma):
+#%% From MLE of Max Rayleigh
+def neff_maxrayleigh_method(fields, sigma):
     m = len(fields)
     maximas = np.zeros(m)
     for k, field in enumerate(fields):
@@ -554,21 +556,21 @@ def neff_maxima_method(fields, sigma):
     return neff, q5, q95, maximas
 
 
-def test_neff_maxima_method():
+def test_neff_maxrayleigh_method():
     # check max likelihood estimation with mock data
     m = 200
     true_neff = 50
     sigma = 2.0
     fields = stats.rayleigh.rvs(size=(m, true_neff), scale=sigma)
-    neff, q5, q95, maximas = neff_maxima_method(fields, sigma)
+    neff, q5, q95, maximas = neff_maxrayleigh_method(fields, sigma)
     print(f"[TEST] true neff: {true_neff}")
     print(f"[TEST] estimated neff: {neff}")
 
 
-test_neff_maxima_method()
+test_neff_maxrayleigh_method()
 
 fields = make_fields(m, wavelength)
-neff, q5, q95, maximas = neff_maxima_method(fields, true_sigma(wavelength))
+neff, q5, q95, maximas = neff_maxrayleigh_method(fields, true_sigma(wavelength))
 
 # Plot
 nvect = np.arange(1, 10000, 10)
@@ -581,7 +583,7 @@ plt.xlabel("effective sample size")
 if not is_paper:
     plt.title(f"maximum likelihood={neff:.0f}")
 if save:
-    plt.savefig("neff_maximas")
+    plt.savefig("neff_maxrayleigh")
 
 # TODO: calculate HPD
 print(report_neff("maxima", [neff]))
@@ -597,8 +599,8 @@ t = np.linspace(2, 6)
 plt.plot(t, fitted_rayleigh_cdf(t))
 plt.title("Fit results for MaxRayleigh - cdf")
 
-pp_plot(maximas, fitted_rayleigh_cdf)
-plt.title("Fit results for MaxRayleigh - PP-plot")
+ax = pp_plot(maximas, fitted_rayleigh_cdf)
+ax.set_title("Fit results for MaxRayleigh - PP-plot")
 
 #%% From area under curve (Goodman // Wagner 1983 eq 31) (unpadded)
 def aca_auc(field, p=1):
@@ -736,14 +738,115 @@ plt.ylabel("estimated effective sample size")
 if save:
     plt.savefig("neff_estimate")
 
+#%% == PART C: determine extremal index
 
-#%% == PART C: pretty plots
+#%% For one (plot and debug)
+m = 200
+wavelength = 0.05
+fields = make_fields(m, wavelength)
+maximas = np.zeros(m)
+for k, field in enumerate(fields):
+    field = make_subfield(field)
+    maximas[k] = np.max(np.abs(field))
+    # maximas[k] = np.max(stats.rayleigh(scale=sigma).rvs(xx.size))  # debug
 
-#%% Effective sample size vs wavelength
+a = true_sigma(wavelength) / np.sqrt(2 * np.log(field.size))
+b = true_sigma(wavelength) * np.sqrt(2 * np.log(field.size))
 
+# debug
+# maximas = stats.gumbel_r(loc=b, scale=a).rvs(m)
+
+# maximum likelihood of a gumbel distribution
+log_theta = -np.log(np.mean(np.exp(-(maximas - b) / a)))
+theta = np.exp(log_theta)
+print(f"theta={theta}")
+
+## Equivalent. mu = a * log_theta + b
+# mu = -a * np.log(np.mean(np.exp(-maximas / a)))
+# log_theta_ = (mu - b) / a
+# theta_ = np.exp(log_theta_)
+# print(f"theta_={theta_}")
+
+print(f"Experimental mean: {np.mean(maximas)}")
+print(f"Th. mean inc. theta: {a * (log_theta + np.euler_gamma) + b}")
+print(f"Th. mean if iid: {np.euler_gamma * a + b}")
+
+fitted_gumbel = stats.gumbel_r(loc=b + a * log_theta, scale=a)
+t = np.linspace(3.4, 6, 200)
+# t = np.linspace(maximas.min(), maximas.max(), 200)
+plt.figure(figsize=(6.4, 2))
+plt.hist(maximas, bins=20, density=True, label="Experimental maxima")
+plt.plot(t, fitted_gumbel.pdf(t), label="Gumbel (fitted)")
+plt.plot(t, stats.gumbel_r.pdf(t, loc=b, scale=a), label="Gumbel (iid)")
+if not is_paper:
+    plt.title(f"wavelength={wavelength}")
+plt.legend()
+if save:
+    plt.savefig("fitted_gumbel")
+
+# pp_plot(maximas, fitted_gumbel.cdf)
+
+#%% == PART D plot neff vs wavelength
 wavelengths = np.array([0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5])
 m = 200
 
+#%% MaxRayleigh neff vs wavelength
+neff_maxrayleigh = np.zeros(len(wavelengths))
+maxrayleigh_cdfs = []
+maximas_per_wavelength = []
+for k, wavelength in enumerate(wavelengths):
+    fields = make_fields(m, wavelength)
+    neff, _, _, maximas = neff_maxrayleigh_method(fields, true_sigma(wavelength))
+    neff_maxrayleigh[k] = neff
+
+    fitted_rayleigh_cdf = lambda t: np.exp(
+        maxrayleigh_logcdf(t, neff_maxrayleigh[k], true_sigma(wavelength))
+    )
+    maxrayleigh_cdfs.append(fitted_rayleigh_cdf)
+    maximas_per_wavelength.append(maximas)
+    # ax = pp_plot(maximas, fitted_rayleigh_cdf, label="Rayleigh")
+    # ax.set_title(f"P-P plot Max Rayleigh wavelength={wavelength}")
+
+#%% Gumbel neff vs wavelength
+log_thetas = []
+gumbel_cdfs = []
+for k, wavelength in enumerate(wavelengths):
+    maximas = maximas_per_wavelength[k]
+    a = true_sigma(wavelength) / np.sqrt(2 * np.log(field.size))
+    b = true_sigma(wavelength) * np.sqrt(2 * np.log(field.size))
+    log_theta = -np.log(np.mean(np.exp(-(maximas - b) / a)))
+    log_thetas.append(log_theta)
+
+    fitted_gumbel = stats.gumbel_r(loc=b + a * log_theta, scale=a)
+    gumbel_cdfs.append(fitted_gumbel.cdf)
+    # ax = pp_plot(maximas, fitted_gumbel.cdf)
+    # ax.set_title(f"P-P plot Gumbel wavelength={wavelength}")
+log_thetas = np.array(log_thetas)
+thetas = np.exp(log_thetas)
+neff_extremal_index = thetas * xx.size
+
+# Plot extremal index vs wavelength
+plt.figure(figsize=(6.4, 2))
+plt.loglog(wavelengths, thetas, ".-")
+plt.ylabel("extremal index")
+plt.xlabel("wavelength")
+if save:
+    plt.savefig("extremal_index")
+
+#%% P-P plot MaxRayleigh and Gumbel
+for k, wavelength in enumerate(wavelengths):
+    maximas = maximas_per_wavelength[k]
+    ax = pp_plot(maximas, maxrayleigh_cdfs[k], label="Rayleigh")
+    pp_plot(maximas, gumbel_cdfs[k], label="Gumbel", ax=ax)
+    ax.legend()
+
+    if not is_paper:
+        plt.title(f"P-P plot, fitted MaxRayleigh and Gumbel, wavelength={wavelength}")
+    if save:
+        wavelength_str = str(wavelength).replace(".", "_")
+        plt.savefig(f"pp_plot_fitted_maxima_{wavelength_str}")
+
+#%% Calculate neff for various techniques
 # padding factor
 p = 2
 
@@ -794,25 +897,7 @@ for wavelength in tqdm.tqdm(wavelengths):
     report["wavelength"] = wavelength
     res.append(report)
 
-#%% Effective sample size estimates which based on a series of fields
-neff_maximas = np.zeros(len(wavelengths))
-for k, wavelength in enumerate(wavelengths):
-    fields = make_fields(m, wavelength)
-    neff, _, _, maximas = neff_maxima_method(fields, true_sigma(wavelength))
-    neff_maximas[k] = neff
-
-    fitted_rayleigh_cdf = lambda t: np.exp(
-        maxrayleigh_logcdf(t, neff, true_sigma(wavelength))
-    )
-    pp_plot(maximas, fitted_rayleigh_cdf)
-    if not is_paper:
-        plt.title(f"P-P plot, fitted MaxRayleigh, wavelength={wavelength}")
-    if save:
-        wavelength_str = str(wavelength).replace(".", "_")
-        plt.savefig(f"pp_plot_fitted_rayleigh_{wavelength_str}")
-
 #%% Plot effective sample size vs wavelength
-
 df = pd.DataFrame(res)
 df.index.name = "method"
 df = df[df.index.isin(["area_main_lobe", "width_main_lobe_padded"])]
@@ -828,94 +913,13 @@ q95 = df.reset_index().pivot(index="wavelength", columns="method", values="q95")
 yerrs = np.stack((vals - q5, q95 - vals), axis=1).T
 vals.plot(label=".-", logy=True, logx=True, yerr=yerrs, capsize=5)
 plt.plot(wavelengths, 1 / wavelengths ** 2, "k--", label=r"$n=\lambda^{-2}$")
-plt.plot(wavelengths, neff_maximas, "-o", label="maxima method")
+plt.plot(wavelengths, neff_maxrayleigh, "-o", label="Max Rayleigh method")
+plt.plot(wavelengths, neff_extremal_index, "-o", label="Extremal index method")
 plt.axis("auto")
 plt.ylabel("effective sample size")
 plt.legend()
 if save:
     plt.savefig("wavelength_vs_neff")
-
-
-#%% == PART D: determine extremal index
-
-#%% For one (plot and debug)
-m = 200
-wavelength = 0.05
-fields = make_fields(m, wavelength)
-maximas = np.zeros(m)
-for k, field in enumerate(fields):
-    field = make_subfield(field)
-    maximas[k] = np.max(np.abs(field))
-    # maximas[k] = np.max(stats.rayleigh(scale=sigma).rvs(xx.size))  # debug
-
-a = true_sigma(wavelength) / np.sqrt(2 * np.log(field.size))
-b = true_sigma(wavelength) * np.sqrt(2 * np.log(field.size))
-
-# debug
-# maximas = stats.gumbel_r(loc=b, scale=a).rvs(m)
-
-# maximum likelihood of a gumbel distribution
-log_theta = -np.log(np.mean(np.exp(-(maximas - b) / a)))
-theta = np.exp(log_theta)
-print(f"theta={theta}")
-
-## Equivalent. mu = a * log_theta + b
-# mu = -a * np.log(np.mean(np.exp(-maximas / a)))
-# log_theta_ = (mu - b) / a
-# theta_ = np.exp(log_theta_)
-# print(f"theta_={theta_}")
-
-print(f"Experimental mean: {np.mean(maximas)}")
-print(f"Th. mean inc. theta: {a * (log_theta + np.euler_gamma) + b}")
-print(f"Th. mean if iid: {np.euler_gamma * a + b}")
-
-fitted_gumbel = stats.gumbel_r(loc=b + a * log_theta, scale=a)
-t = np.linspace(3.4, 6, 200)
-# t = np.linspace(maximas.min(), maximas.max(), 200)
-plt.figure(figsize=(6.4, 2))
-plt.hist(maximas, bins=20, density=True, label="Experimental maxima")
-plt.plot(t, fitted_gumbel.pdf(t), label="Gumbel (fitted)")
-plt.plot(t, stats.gumbel_r.pdf(t, loc=b, scale=a), label="Gumbel (iid)")
-if not is_paper:
-    plt.title(f"wavelength={wavelength}")
-plt.legend()
-if save:
-    plt.savefig("fitted_gumbel")
-
-# pp_plot(maximas, fitted_gumbel.cdf)
-
-#%%
-wavelengths = np.array([0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5])
-log_thetas = []
-for wavelength in tqdm.tqdm(wavelengths):
-    fields = make_fields(m, wavelength)
-    maximas = np.zeros(m)
-    for k, field in enumerate(fields):
-        field = make_subfield(field)
-        maximas[k] = np.max(np.abs(field))
-    a = true_sigma(wavelength) / np.sqrt(2 * np.log(field.size))
-    b = true_sigma(wavelength) * np.sqrt(2 * np.log(field.size))
-    log_theta = -np.log(np.mean(np.exp(-(maximas - b) / a)))
-    log_thetas.append(log_theta)
-
-    fitted_gumbel = stats.gumbel_r(loc=b + a * log_theta, scale=a)
-    pp_plot(maximas, fitted_gumbel.cdf)
-    if not is_paper:
-        plt.title(f"P-P plot, fitted Gumbel, wavelength={wavelength}")
-    if save:
-        wavelength_str = str(wavelength).replace(".", "_")
-        plt.savefig(f"pp_plot_fitted_gumbel_{wavelength_str}")
-log_thetas = np.array(log_thetas)
-thetas = np.exp(log_thetas)
-
-#%%
-plt.figure(figsize=(6.4, 2))
-plt.loglog(wavelengths, thetas, ".-")
-plt.ylabel("extremal index")
-plt.xlabel("wavelength")
-if save:
-    plt.savefig("extremal_index")
-
 
 #%% == PART E: further tests
 
@@ -940,3 +944,36 @@ plt.loglog(wavelengths, 1 / wavelengths, label="1/wavelength")
 plt.xlabel("wavelength")
 plt.title("RMS signal-to-noise ratio")
 plt.legend()
+
+#%% Block estimate of extremal index
+# Smith and Weissman 1994
+# Problem: depends a LOT on the threshold and the block size
+wavelength = 0.02
+estimates = np.zeros(m)
+block_size = 32
+threshold = stats.rayleigh(scale=true_sigma(wavelength)).ppf(0.95)
+numblock_x = len(x) // block_size
+numblock_y = len(y) // block_size
+print(f"numblocks {numblock_x*numblock_y}")
+fields = make_fields(m, wavelength)
+for k, field in enumerate(tqdm.tqdm(fields)):
+    field = make_subfield(field)
+    num_pixels_above_threshold = np.sum(field >= threshold)
+    num_blocks_above_threshold = 0
+    for i in range(numblock_x):
+        for j in range(numblock_y):
+            block = field[
+                i * block_size : (i + 1) * block_size,
+                j * block_size : (j + 1) * block_size,
+            ]
+            num_blocks_above_threshold += bool(np.any(block >= threshold))
+    estimates[k] = num_blocks_above_threshold / num_pixels_above_threshold
+
+plt.figure()
+plt.hist(estimates, density=True, bins=30)
+plt.axvline(
+    thetas[np.nonzero(wavelengths == wavelength)[0][0]], color="C1", label="MLE"
+)
+plt.xlim([0, 1])
+plt.xlabel("extremal index")
+plt.title("block estimate of extremal index")

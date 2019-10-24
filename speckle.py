@@ -196,7 +196,7 @@ if save:
     plt.savefig("psf_autocorr")
 
 #%% Plot field
-for wavelength in [0.01, 0.05, 0.1, 0.2, 0.5]:
+for wavelength in [0.01, 0.05, 0.1, 0.2, 0.5, 1.0, 1.5]:
     np.random.seed(123)
     field, _ = make_field(wavelength)
     plt.figure(figsize=FIGSIZE_HALF_SQUARE)
@@ -809,7 +809,7 @@ for k, wavelength in enumerate(wavelengths):
 
 #%% Gumbel neff vs wavelength
 log_thetas = []
-gumbel_cdfs = []
+gumbels = []
 for k, wavelength in enumerate(wavelengths):
     maximas = maximas_per_wavelength[k]
     a = true_sigma(wavelength) / np.sqrt(2 * np.log(field.size))
@@ -818,7 +818,7 @@ for k, wavelength in enumerate(wavelengths):
     log_thetas.append(log_theta)
 
     fitted_gumbel = stats.gumbel_r(loc=b + a * log_theta, scale=a)
-    gumbel_cdfs.append(fitted_gumbel.cdf)
+    gumbels.append(fitted_gumbel)
     # ax = pp_plot(maximas, fitted_gumbel.cdf)
     # ax.set_title(f"P-P plot Gumbel wavelength={wavelength}")
 log_thetas = np.array(log_thetas)
@@ -837,7 +837,7 @@ if save:
 for k, wavelength in enumerate(wavelengths):
     maximas = maximas_per_wavelength[k]
     ax = pp_plot(maximas, maxrayleigh_cdfs[k], label="Rayleigh")
-    pp_plot(maximas, gumbel_cdfs[k], label="Gumbel", ax=ax)
+    pp_plot(maximas, gumbels[k].cdf, label="Gumbel", ax=ax)
     ax.legend()
 
     if not is_paper:
@@ -845,6 +845,27 @@ for k, wavelength in enumerate(wavelengths):
     if save:
         wavelength_str = str(wavelength).replace(".", "_")
         plt.savefig(f"pp_plot_fitted_maxima_{wavelength_str}")
+
+#%% Histograms MaxRayleigh and Gumbel
+for k, wavelength in enumerate(wavelengths):
+    maximas = maximas_per_wavelength[k]
+    t = np.linspace(1, 7, 200)
+
+    fitted_rayleigh_pdf = lambda t: np.exp(
+        maxrayleigh_logpdf(t, neff_maxrayleigh[k], true_sigma(wavelength))
+    )
+    plt.figure(figsize=FIGSIZE_HALF_SQUARE)
+    plt.hist(maximas, density=True, bins=20)
+    plt.plot(t, fitted_rayleigh_pdf(t), label="MaxRayleigh")
+    plt.plot(t, gumbels[k].pdf(t), label="Gumbel")
+    plt.legend()
+    plt.xlabel("peak amplitudes")
+    plt.ylabel("density")
+    if not is_paper:
+        plt.title(f"wavelength={wavelength}")
+    if save:
+        wavelength_str = str(wavelength).replace(".", "_")
+        plt.savefig(f"hist_fitted_maxima_{wavelength_str}")
 
 #%% Calculate neff for various techniques
 # padding factor

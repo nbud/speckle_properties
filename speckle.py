@@ -214,7 +214,7 @@ for wavelength in [0.01, 0.05, 0.1, 0.2, 0.5, 1.0, 1.5]:
 
 all_reports_sigma = pd.DataFrame()
 wavelength = 0.1
-m = 200
+m = 2000
 
 
 def report_sigma(method_name, estimates):

@@ -333,6 +333,9 @@ plt.plot(t, rayleigh.pdf(t), label="Rayleigh(sigma)")
 plt.plot(t, fitte_drayleigh.pdf(t), label="Fitted Rayleigh")
 plt.legend()
 
+#%% Close figures
+plt.close("all")
+
 #%% == PART B: estimation of effective sample size
 
 all_reports_neff = pd.DataFrame()
@@ -388,9 +391,6 @@ plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(np.abs(autocorr_normed), extent=extent_centred)
 plt.xlabel("x")
 plt.ylabel("z")
-if is_paper:
-    plt.xlim([-0.25, 0.25])
-    plt.ylim([-0.25, 0.25])
 if not is_paper:
     plt.title("autocorrelation")
 if save:
@@ -400,9 +400,6 @@ plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(np.abs(autocorr_normed) > 1 / np.e, extent=extent_centred)
 plt.xlabel("x")
 plt.ylabel("z")
-if is_paper:
-    plt.xlim([-0.25, 0.25])
-    plt.ylim([-0.25, 0.25])
 if not is_paper:
     plt.title("autocorrelation thresholded with 1/e")
 if save:
@@ -412,9 +409,6 @@ plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(labels, extent=extent_centred)
 plt.xlabel("x")
 plt.ylabel("z")
-if is_paper:
-    plt.xlim([-0.25, 0.25])
-    plt.ylim([-0.25, 0.25])
 if not is_paper:
     plt.title("clusters in thresholded autocorrelation")
 if save:
@@ -424,9 +418,6 @@ plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(labels == centre_label, extent=extent_centred)
 plt.xlabel("x")
 plt.ylabel("z")
-if is_paper:
-    plt.xlim([-0.25, 0.25])
-    plt.ylim([-0.25, 0.25])
 if not is_paper:
     plt.title("main lobe for width")
 if save:
@@ -632,9 +623,6 @@ plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(np.abs(autocorr_normed), extent=extent_centred)
 plt.xlabel("x")
 plt.ylabel("z")
-if is_paper:
-    plt.xlim([-0.25, 0.25])
-    plt.ylim([-0.25, 0.25])
 if not is_paper:
     plt.title("autocorr")
 if save:
@@ -644,9 +632,6 @@ plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(gradr, extent=extent_centred)
 plt.xlabel("x")
 plt.ylabel("z")
-if is_paper:
-    plt.xlim([-0.25, 0.25])
-    plt.ylim([-0.25, 0.25])
 if not is_paper:
     plt.title("grad_r")
 if save:
@@ -656,9 +641,6 @@ plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(gradr <= 0, extent=extent_centred)
 plt.xlabel("x")
 plt.ylabel("z")
-if is_paper:
-    plt.xlim([-0.25, 0.25])
-    plt.ylim([-0.25, 0.25])
 if not is_paper:
     plt.title("grad_r <= 0")
 if save:
@@ -668,9 +650,6 @@ plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(main_lobe, extent=extent_centred)
 plt.xlabel("x")
 plt.ylabel("z")
-if is_paper:
-    plt.xlim([-0.25, 0.25])
-    plt.ylim([-0.25, 0.25])
 if not is_paper:
     plt.title("Main lobe")
 if save:
@@ -716,7 +695,6 @@ plt.hist(estimates, density=True, bins=30)
 
 print(report_neff("area_main_lobe_int", estimates))
 
-
 #%% Conclusion part B
 print(all_reports_neff.T)
 report_neff("from_wavelength", [1 / wavelength ** 2])
@@ -736,6 +714,9 @@ plt.gca().set_xticklabels(vals.index, rotation=80)
 plt.ylabel("estimated effective sample size")
 if save:
     plt.savefig("neff_estimate")
+
+#%% Close figures
+plt.close("all")
 
 #%% == PART C: determine extremal index
 
@@ -784,6 +765,9 @@ if save:
     plt.savefig("fitted_gumbel")
 
 # pp_plot(maxima, fitted_gumbel.cdf)
+
+#%% Close figures
+plt.close("all")
 
 #%% == PART D plot neff vs wavelength
 wavelengths = np.array([0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5])
@@ -961,6 +945,9 @@ plt.ylabel("effective sample size")
 plt.legend()
 if save:
     plt.savefig("wavelength_vs_neff")
+
+#%% Close figures
+plt.close("all")
 
 #%% == PART E: further tests
 

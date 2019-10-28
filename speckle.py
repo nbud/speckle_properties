@@ -34,7 +34,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import tqdm
-from scipy import ndimage, stats, optimize
+from scipy import ndimage, stats
 import functools
 import pandas as pd
 
@@ -518,17 +518,7 @@ def neff_maxrayleigh_method(fields, sigma):
     for k, field in enumerate(fields):
         field = make_subfield(field)
         maxima[k] = np.max(np.abs(field))
-
-    # Calculate max likelihood
-    likelihood_func = lambda n: -maxrayleigh_logpdf(maxima, n, sigma).sum()
-    res = optimize.minimize_scalar(
-        likelihood_func,
-        bounds=(1, xx_ext.size),
-        method="bounded",
-        options={"xatol": 1e-03},
-    )
-    assert res.success
-    neff = res.x
+    neff = -m / np.sum(rayleigh_logcdf(maxima / sigma))
     q5 = None  # TODO
     q95 = None  # TODO
     return neff, q5, q95, maxima
@@ -541,6 +531,7 @@ def test_neff_maxrayleigh_method():
     sigma = 2.0
     fields = stats.rayleigh.rvs(size=(m, true_neff), scale=sigma)
     neff, q5, q95, maxima = neff_maxrayleigh_method(fields, sigma)
+
     print(f"[TEST] true neff: {true_neff}")
     print(f"[TEST] estimated neff: {neff}")
 

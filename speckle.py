@@ -728,15 +728,9 @@ b = true_sigma(wavelength) * np.sqrt(2 * np.log(field.size))
 # maxima = stats.gumbel_r(loc=b, scale=a).rvs(m)
 
 # maximum likelihood of a gumbel distribution
-log_theta = -np.log(np.mean(np.exp(-(maxima - b) / a)))
-theta = np.exp(log_theta)
+theta = 1 / (field.size ** 2 * np.mean(np.exp(-(maxima) / a)))
+log_theta = np.log(theta)
 print(f"theta={theta}")
-
-## Equivalent. mu = a * log_theta + b
-# mu = -a * np.log(np.mean(np.exp(-maxima / a)))
-# log_theta_ = (mu - b) / a
-# theta_ = np.exp(log_theta_)
-# print(f"theta_={theta_}")
 
 print(f"Experimental mean: {np.mean(maxima)}")
 print(f"Th. mean inc. theta: {a * (log_theta + np.euler_gamma) + b}")
@@ -782,21 +776,20 @@ for k, wavelength in enumerate(wavelengths):
     # ax.set_title(f"P-P plot Max Rayleigh wavelength={wavelength}")
 
 #%% Gumbel neff vs wavelength
-log_thetas = []
+thetas = []
 gumbels = []
 for k, wavelength in enumerate(wavelengths):
     maxima = maxima_per_wavelength[k]
     a = true_sigma(wavelength) / np.sqrt(2 * np.log(field.size))
     b = true_sigma(wavelength) * np.sqrt(2 * np.log(field.size))
-    log_theta = -np.log(np.mean(np.exp(-(maxima - b) / a)))
-    log_thetas.append(log_theta)
+    theta = 1 / (field.size ** 2 * np.mean(np.exp(-(maxima) / a)))
+    thetas.append(theta)
 
     fitted_gumbel = stats.gumbel_r(loc=b + a * log_theta, scale=a)
     gumbels.append(fitted_gumbel)
     # ax = pp_plot(maxima, fitted_gumbel.cdf)
     # ax.set_title(f"P-P plot Gumbel wavelength={wavelength}")
-log_thetas = np.array(log_thetas)
-thetas = np.exp(log_thetas)
+thetas = np.array(thetas)
 neff_extremal_index = thetas * xx.size
 
 # Plot extremal index vs wavelength

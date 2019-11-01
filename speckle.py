@@ -706,6 +706,10 @@ plt.ylabel("estimated effective sample size")
 if save:
     plt.savefig("neff_estimate")
 
+speckle_cell_lengths = pd.Series(
+    np.sqrt(1 / all_reports_neff_df["mean"]) / wavelength, name="speckle_cell_lenght"
+)
+print(speckle_cell_lengths)
 #%% Close figures
 plt.close("all")
 
@@ -785,7 +789,7 @@ for k, wavelength in enumerate(wavelengths):
     theta = 1 / (field.size ** 2 * np.mean(np.exp(-(maxima) / a)))
     thetas.append(theta)
 
-    fitted_gumbel = stats.gumbel_r(loc=b + a * log_theta, scale=a)
+    fitted_gumbel = stats.gumbel_r(loc=b + a * np.log(theta), scale=a)
     gumbels.append(fitted_gumbel)
     # ax = pp_plot(maxima, fitted_gumbel.cdf)
     # ax.set_title(f"P-P plot Gumbel wavelength={wavelength}")
@@ -799,40 +803,6 @@ plt.ylabel("extremal index")
 plt.xlabel("wavelength")
 if save:
     plt.savefig("extremal_index")
-
-#%% P-P plot MaxRayleigh and Gumbel
-for k, wavelength in enumerate(wavelengths):
-    maxima = maxima_per_wavelength[k]
-    ax = pp_plot(maxima, maxrayleigh_cdfs[k], label="Rayleigh")
-    pp_plot(maxima, gumbels[k].cdf, label="Gumbel", ax=ax)
-    ax.legend()
-
-    if not is_paper:
-        plt.title(f"P-P plot, fitted MaxRayleigh and Gumbel, wavelength={wavelength}")
-    if save:
-        wavelength_str = str(wavelength).replace(".", "_")
-        plt.savefig(f"pp_plot_fitted_maxima_{wavelength_str}")
-
-#%% Histograms MaxRayleigh and Gumbel
-for k, wavelength in enumerate(wavelengths):
-    maxima = maxima_per_wavelength[k]
-    t = np.linspace(1, 7, 200)
-
-    fitted_rayleigh_pdf = lambda t: np.exp(
-        maxrayleigh_logpdf(t, neff_maxrayleigh[k], true_sigma(wavelength))
-    )
-    plt.figure(figsize=FIGSIZE_HALF_SQUARE)
-    plt.hist(maxima, density=True, bins=20)
-    plt.plot(t, fitted_rayleigh_pdf(t), label="MaxRayleigh")
-    plt.plot(t, gumbels[k].pdf(t), label="Gumbel")
-    plt.legend()
-    plt.xlabel("peak amplitudes")
-    plt.ylabel("density")
-    if not is_paper:
-        plt.title(f"wavelength={wavelength}")
-    if save:
-        wavelength_str = str(wavelength).replace(".", "_")
-        plt.savefig(f"hist_fitted_maxima_{wavelength_str}")
 
 #%% Calculate neff for various techniques
 # padding factor
@@ -866,7 +836,81 @@ df.index.name = "method"
 print("Mean spread (range90/mean)")
 (df["range90"] / df["mean"]).groupby(df.index).mean()
 
-#%% Plot effective sample size vs wavelength
+#%% P-P plots
+df = pd.DataFrame(res)
+df.index.name = "method"
+df = df.set_index("wavelength", append=True)
+
+for k, wavelength in enumerate(wavelengths):
+    maxima = maxima_per_wavelength[k]
+    ax = pp_plot(maxima, maxrayleigh_cdfs[k], label="MaxRayleigh")
+    pp_plot(maxima, gumbels[k].cdf, label="Gumbel", ax=ax)
+
+    neff = df.loc[("width_main_lobe_amp", wavelength), "mean"]
+    cdf = lambda t: np.exp(maxrayleigh_logcdf(t, neff, true_sigma(wavelength)))
+    pp_plot(maxima, cdf, label="Width", ax=ax)
+
+    neff = df.loc[("area_main_lobe_amp", wavelength), "mean"]
+    cdf = lambda t: np.exp(maxrayleigh_logcdf(t, neff, true_sigma(wavelength)))
+    pp_plot(maxima, cdf, label="Area", ax=ax)
+    ax.legend()
+
+    if not is_paper:
+        plt.title(f"P-P plot, fitted MaxRayleigh and Gumbel, wavelength={wavelength}")
+    if save:
+        wavelength_str = str(wavelength).replace(".", "_")
+        plt.savefig(f"pp_plot_fitted_maxima_{wavelength_str}")
+
+#%% Histograms MaxRayleigh and Gumbel
+df = pd.DataFrame(res)
+df.index.name = "method"
+df = df.set_index("wavelength", append=True)
+
+for k, wavelength in enumerate(wavelengths):
+    maxima = maxima_per_wavelength[k]
+    t = np.linspace(1.0, 6.0, 200)
+
+    fitted_rayleigh_pdf = lambda t: np.exp(
+        maxrayleigh_logpdf(t, neff_maxrayleigh[k], true_sigma(wavelength))
+    )
+    plt.figure(figsize=FIGSIZE_HALF_SQUARE)
+    plt.hist(maxima, density=True, bins=20, color="grey")
+    plt.plot(t, fitted_rayleigh_pdf(t), label="MaxRayl.")
+    plt.plot(t, gumbels[k].pdf(t), label="Gumbel")
+
+    neff = df.loc[("width_main_lobe_amp", wavelength), "mean"]
+    plt.plot(
+        t, np.exp(maxrayleigh_logpdf(t, neff, true_sigma(wavelength))), label="Width"
+    )
+    neff = df.loc[("area_main_lobe_amp", wavelength), "mean"]
+    plt.plot(
+        t, np.exp(maxrayleigh_logpdf(t, neff, true_sigma(wavelength))), label="Area"
+    )
+    plt.legend()
+    plt.xlabel("peak amplitudes")
+    plt.ylabel("density")
+    if not is_paper:
+        plt.title(f"wavelength={wavelength}")
+    if save:
+        wavelength_str = str(wavelength).replace(".", "_")
+        plt.savefig(f"hist_fitted_maxima_{wavelength_str}")
+
+
+#%%
+def rename_methods_short(df):
+    return df.rename(
+        index={
+            "area_main_lobe_amp": "Area method from amplitudes",
+            "area_main_lobe_complex": "Area method from complex amp.",
+            "area_main_lobe_int": "Area method from intensities",
+            "width_main_lobe_amp": "Width method from amplitudes",
+            "width_main_lobe_complex": "Width method from complex amp.",
+            "width_main_lobe_int": "Width method from intensities",
+        }
+    )
+
+
+#%% Plot effective sample size vs wavelength [AREA]
 df = pd.DataFrame(res)
 df.index.name = "method"
 df = df[
@@ -874,6 +918,7 @@ df = df[
         ["area_main_lobe_complex", "area_main_lobe_amp", "area_main_lobe_int"]
     )
 ]
+df = rename_methods_short(df)
 vals = df.reset_index().pivot(index="wavelength", columns="method", values="mean")
 q5 = df.reset_index().pivot(index="wavelength", columns="method", values="q5")
 q95 = df.reset_index().pivot(index="wavelength", columns="method", values="q95")
@@ -886,7 +931,7 @@ plt.legend()
 if save:
     plt.savefig("wavelength_vs_neff_area_main_lobe")
 
-#%% Plot effective sample size vs wavelength
+#%% Plot effective sample size vs wavelength [WIDTH]
 df = pd.DataFrame(res)
 df.index.name = "method"
 df = df[
@@ -894,6 +939,7 @@ df = df[
         ["width_main_lobe_complex", "width_main_lobe_amp", "width_main_lobe_int"]
     )
 ]
+df = rename_methods_short(df)
 vals = df.reset_index().pivot(index="wavelength", columns="method", values="mean")
 q5 = df.reset_index().pivot(index="wavelength", columns="method", values="q5")
 q95 = df.reset_index().pivot(index="wavelength", columns="method", values="q95")
@@ -906,23 +952,18 @@ plt.legend()
 if save:
     plt.savefig("wavelength_vs_neff_width_main_lobe")
 
-#%% Plot effective sample size vs wavelength
+#%% Plot effective sample size vs wavelength [ALL]
 df = pd.DataFrame(res)
 df.index.name = "method"
-# df = df[df.index.isin(["area_main_lobe", "width_main_lobe_padded"])]
-# df = df.rename(
-#    index={
-#        "area_main_lobe": "area of main lobe",
-#        "width_main_lobe_padded": "width of main lobe",
-#    }
-# )
+df = df[df.index.isin(["area_main_lobe_amp", "width_main_lobe_amp"])]
+df = rename_methods_short(df)
 vals = df.reset_index().pivot(index="wavelength", columns="method", values="mean")
 q5 = df.reset_index().pivot(index="wavelength", columns="method", values="q5")
 q95 = df.reset_index().pivot(index="wavelength", columns="method", values="q95")
 yerrs = np.stack((vals - q5, q95 - vals), axis=1).T
 vals.plot(label=".-", logy=True, logx=True, yerr=yerrs, capsize=5)
 plt.plot(wavelengths, 1 / wavelengths ** 2, "k--", label=r"$n=\lambda^{-2}$")
-plt.plot(wavelengths, neff_maxrayleigh, "-o", label="Max Rayleigh method")
+plt.plot(wavelengths, neff_maxrayleigh, "-o", label="MaxRayleigh method")
 plt.plot(wavelengths, neff_extremal_index, "-o", label="Extremal index method")
 plt.axis("auto")
 plt.ylabel("effective sample size")

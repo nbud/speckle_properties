@@ -637,8 +637,10 @@ if not is_paper:
 if save:
     plt.savefig("auc_c")
 
+autocorr_normed_censored = np.abs(autocorr_normed).copy()
+autocorr_normed_censored[~main_lobe] = 0.
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
-plt.imshow(main_lobe, extent=extent_centred)
+plt.imshow(autocorr_normed_censored, extent=extent_centred)
 plt.xlabel("x")
 plt.ylabel("z")
 if not is_paper:

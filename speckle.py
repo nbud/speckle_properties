@@ -481,7 +481,7 @@ def maxrayleigh_logcdf(x, n, sigma):
     """
     cdf of max of n iid Rayleigh distribution
     """
-    return n * rayleigh_logcdf(x)
+    return n * rayleigh_logcdf(x / sigma)
 
 
 def maxrayleigh_logpdf(x, n, sigma):

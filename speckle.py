@@ -78,8 +78,18 @@ underlying_sigma = 1.0 / np.sqrt(xx_ext.size)
 
 @functools.lru_cache(maxsize=100, typed=False)
 def make_psf(wavelength):
-    psf = np.exp(2j * np.pi / wavelength * r)
-    # psf = np.exp(2j * np.pi / wavelength * r) * np.exp(-(r / wavelength) ** 2)
+    # PSF which does not vanish
+    # psf = np.exp(2j * np.pi / wavelength * r)
+
+    # PSF which vanish in lambda
+    psf = np.exp(2j * np.pi / wavelength * r) * np.exp(-((r / wavelength) ** 2))
+
+    # PSF which vanish in 1
+    # a = 1/np.sqrt(-np.log(0.01))
+    # psf = np.exp(2j * np.pi / wavelength * r) * np.exp(-(r / a) ** 2)
+
+    # rescale so that sigma=1
+    psf /= np.sqrt(np.mean(np.abs(psf) ** 2))
     psf_fft = np.fft.fft2(psf)
     return psf, psf_fft
 
@@ -93,12 +103,7 @@ def true_sigma(wavelength):
     """
     True sigma. Must be consistent with PSF!
     """
-    # # empirical, Rayleigh ML
-    # fields = make_fields(m, wavelength)
-    # sigma_hat = np.sqrt(np.mean(np.abs(fields) ** 2)) / np.sqrt(2)
-    # return sigma_hat
-
-    return 1.0
+    return np.sqrt(np.mean(np.abs(make_psf(wavelength)[0]) ** 2))
 
 
 def make_field(wavelength=0.1):
@@ -222,7 +227,7 @@ m = 2000
 def report_sigma(method_name, estimates):
     out = {}
     out["mean"] = np.mean(estimates)
-    out["trueness_err"] = np.abs(1 - np.mean(estimates))
+    out["trueness_err"] = np.abs(true_sigma(wavelength) - np.mean(estimates))
     out["std"] = np.std(estimates)
     out["q5"] = np.quantile(estimates, 0.05)
     out["q95"] = np.quantile(estimates, 0.95)
@@ -308,7 +313,7 @@ plt.figure(figsize=(6.4, 2.0))
 vals.plot.bar(yerr=yerrs, capsize=5)
 plt.gca().set_xticklabels(vals.index, rotation=45)
 plt.ylabel("estimated sigma")
-plt.ylim([0.8, 1.15])
+plt.ylim([0.9, 1.1])
 if save:
     plt.savefig("sigma_estimate")
 
@@ -564,12 +569,20 @@ fitted_rayleigh_cdf = lambda t: np.exp(
 ecdf_x, ecdf = make_ecdf(maxima)
 plt.figure()
 plt.step(ecdf_x, ecdf)
-t = np.linspace(2, 6)
+t = np.linspace(3, 6, 200)
 plt.plot(t, fitted_rayleigh_cdf(t))
 plt.title("Fit results for MaxRayleigh - cdf")
 
 ax = pp_plot(maxima, fitted_rayleigh_cdf)
 ax.set_title("Fit results for MaxRayleigh - PP-plot")
+
+fitted_rayleigh_pdf = lambda t: np.exp(
+    maxrayleigh_logpdf(t, neff, true_sigma(wavelength))
+)
+plt.figure()
+plt.hist(maxima, density=True)
+plt.plot(t, fitted_rayleigh_pdf(t))
+
 
 #%% From area under main lobe [COMPLEX]
 # (Goodman // Wagner 1983 eq 31) (unpadded)
@@ -638,7 +651,7 @@ if save:
     plt.savefig("auc_c")
 
 autocorr_normed_censored = np.abs(autocorr_normed).copy()
-autocorr_normed_censored[~main_lobe] = 0.
+autocorr_normed_censored[~main_lobe] = 0.0
 plt.figure(figsize=FIGSIZE_HALF_SQUARE)
 plt.imshow(autocorr_normed_censored, extent=extent_centred)
 plt.xlabel("x")
@@ -743,7 +756,7 @@ print(f"Th. mean inc. theta: {a * (log_theta + np.euler_gamma) + b}")
 print(f"Th. mean if iid: {np.euler_gamma * a + b}")
 
 fitted_gumbel = stats.gumbel_r(loc=b + a * log_theta, scale=a)
-t = np.linspace(3.4, 6, 200)
+t = np.linspace(3.7, 6, 200)
 # t = np.linspace(maxima.min(), maxima.max(), 200)
 plt.figure(figsize=(6.4, 2))
 plt.hist(maxima, bins=20, density=True, label="Experimental maxima")
@@ -836,7 +849,7 @@ for wavelength in tqdm.tqdm(wavelengths):
 df = pd.DataFrame(res)
 df.index.name = "method"
 print("Mean spread (range90/mean)")
-(df["range90"] / df["mean"]).groupby(df.index).mean()
+print((df["range90"] / df["mean"]).groupby(df.index).mean())
 
 #%% P-P plots
 df = pd.DataFrame(res)
@@ -868,9 +881,17 @@ df = pd.DataFrame(res)
 df.index.name = "method"
 df = df.set_index("wavelength", append=True)
 
+_tmin = np.inf
+_tmax = 0
 for k, wavelength in enumerate(wavelengths):
     maxima = maxima_per_wavelength[k]
-    t = np.linspace(1.0, 6.0, 200)
+    _tmin = min(_tmin, np.min(maxima))
+    _tmax = max(_tmax, np.max(maxima))
+
+
+for k, wavelength in enumerate(wavelengths):
+    maxima = maxima_per_wavelength[k]
+    t = np.linspace(_tmin, _tmax, 500)
 
     fitted_rayleigh_pdf = lambda t: np.exp(
         maxrayleigh_logpdf(t, neff_maxrayleigh[k], true_sigma(wavelength))
